@@ -1,0 +1,846 @@
+diff --git a/package.json b/package.json
+index 31d6964a..746901eb 100644
+--- a/package.json
++++ b/package.json
+@@ -9,6 +9,7 @@
+     "tauri": "tauri",
+     "dev:renderer": "vite",
+     "build:renderer": "vite build",
++    "build:web": "vite build --config vite.web.config.ts",
+     "typecheck": "tsc --noEmit",
+     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
+     "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,css,json}\"",
+diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
+index 435b40ef..791db22a 100644
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -6,3 +6,7 @@ onlyBuiltDependencies:
+ 
+ ignoredBuiltDependencies:
+   - msw
++
++allowBuilds:
++  esbuild: true
++  msw: false
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 91599b0e..f5b85e31 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -27,7 +27,7 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
+ serde = { version = "1.0", features = ["derive"] }
+ log = "0.4"
+ chrono = { version = "0.4", features = ["serde"] }
+-tauri = { version = "2.8.2", features = ["tray-icon", "protocol-asset", "image-png"] }
++tauri = { version = "2.8.2", features = ["tray-icon", "protocol-asset", "image-png", "test"] }
+ tauri-plugin-log = "2"
+ tauri-plugin-opener = "2"
+ tauri-plugin-process = "2"
+diff --git a/src-tauri/src/app_store.rs b/src-tauri/src/app_store.rs
+index a1333c90..f28585df 100644
+--- a/src-tauri/src/app_store.rs
++++ b/src-tauri/src/app_store.rs
+@@ -26,7 +26,7 @@ pub fn get_app_config_dir_override() -> Option<PathBuf> {
+     override_cache().read().ok()?.clone()
+ }
+ 
+-fn read_override_from_store(app: &tauri::AppHandle) -> Option<PathBuf> {
++fn read_override_from_store<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+     let store = match app.store_builder("app_paths.json").build() {
+         Ok(store) => store,
+         Err(e) => {
+@@ -64,15 +64,15 @@ fn read_override_from_store(app: &tauri::AppHandle) -> Option<PathBuf> {
+ }
+ 
+ /// 从 Store 刷新 app_config_dir 覆盖值并更新缓存
+-pub fn refresh_app_config_dir_override(app: &tauri::AppHandle) -> Option<PathBuf> {
++pub fn refresh_app_config_dir_override<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+     let value = read_override_from_store(app);
+     update_cached_override(value.clone());
+     value
+ }
+ 
+ /// 写入 app_config_dir 到 Tauri Store
+-pub fn set_app_config_dir_to_store(
+-    app: &tauri::AppHandle,
++pub fn set_app_config_dir_to_store<R: tauri::Runtime>(
++    app: &tauri::AppHandle<R>,
+     path: Option<&str>,
+ ) -> Result<(), AppError> {
+     let store = app
+@@ -125,7 +125,7 @@ fn resolve_path(raw: &str) -> PathBuf {
+ }
+ 
+ /// 从旧的 settings.json 迁移 app_config_dir 到 Store
+-pub fn migrate_app_config_dir_from_settings(app: &tauri::AppHandle) -> Result<(), AppError> {
++pub fn migrate_app_config_dir_from_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), AppError> {
+     // app_config_dir 已从 settings.json 移除，此函数保留但不再执行迁移
+     // 如果用户在旧版本设置过 app_config_dir，需要在 Store 中手动配置
+     log::info!("app_config_dir 迁移功能已移除，请在设置中重新配置");
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 68837653..69054dcb 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -35,6 +35,7 @@ mod session_manager;
+ mod settings;
+ mod store;
+ 
++pub mod headless;
+ mod tray;
+ mod usage_events;
+ mod usage_script;
+@@ -65,6 +66,326 @@ pub use services::{
+ };
+ pub use settings::{update_settings, AppSettings};
+ pub use store::AppState;
++
++/// 全部 Tauri 命令的统一注册宏。
++///
++/// 桌面端 `run()` 与无头 Web 服务端（`headless.rs`）共用同一份命令清单，
++/// 避免两处 284 项命令列表漂移。用法：
++/// `let builder = crate::invoke_handler_with_all_commands!(builder);`
++///
++/// 签名中使用具体 `tauri::AppHandle`（Wry）/ `tauri::Window` 的 GUI 专属命令
++/// 无法在 MockRuntime（无头模式）下编译，由调用方作为 `$extra` 追加：
++/// 桌面端 `run()` 传入这些命令，无头端不传（对应前端功能优雅降级为报错）。
++#[macro_export]
++macro_rules! invoke_handler_with_all_commands {
++    ($builder:expr) => {
++        $crate::invoke_handler_with_all_commands!($builder,)
++    };
++    ($builder:expr, $($extra:path),* $(,)?) => {
++        $builder.invoke_handler(tauri::generate_handler![
++            $crate::commands::get_providers,
++            $crate::commands::get_current_provider,
++            $crate::commands::add_provider,
++            $crate::commands::update_provider,
++            $crate::commands::delete_provider,
++            $crate::commands::remove_provider_from_live_config,
++            $crate::commands::switch_provider,
++            $crate::commands::import_default_config,
++            $crate::commands::get_claude_desktop_status,
++            $crate::commands::get_claude_desktop_default_routes,
++            $crate::commands::import_claude_desktop_providers_from_claude,
++            $crate::commands::ensure_claude_desktop_official_provider,
++            $crate::commands::ensure_codex_official_provider,
++            $crate::commands::get_claude_config_status,
++            $crate::commands::get_config_status,
++            $crate::commands::get_claude_code_config_path,
++            $crate::commands::get_config_dir,
++            $crate::commands::get_init_error,
++            $crate::commands::get_migration_result,
++            $crate::commands::get_skills_migration_result,
++            $crate::commands::get_app_config_path,
++            $crate::commands::get_claude_common_config_snippet,
++            $crate::commands::set_claude_common_config_snippet,
++            $crate::commands::get_common_config_snippet,
++            $crate::commands::set_common_config_snippet,
++            $crate::commands::update_toml_common_config_snippet,
++            $crate::commands::extract_common_config_snippet,
++            $crate::commands::read_live_provider_settings,
++            $crate::commands::get_settings,
++            $crate::commands::save_settings,
++            $crate::commands::has_codex_unify_history_backup,
++            $crate::commands::restore_codex_unified_history,
++            $crate::commands::get_rectifier_config,
++            $crate::commands::set_rectifier_config,
++            $crate::commands::get_optimizer_config,
++            $crate::commands::set_optimizer_config,
++            $crate::commands::get_copilot_optimizer_config,
++            $crate::commands::set_copilot_optimizer_config,
++            $crate::commands::get_log_config,
++            $crate::commands::set_log_config,
++            $crate::commands::is_portable_mode,
++            $crate::commands::copy_text_to_clipboard,
++            $crate::commands::get_claude_plugin_status,
++            $crate::commands::read_claude_plugin_config,
++            $crate::commands::apply_claude_plugin_config,
++            $crate::commands::is_claude_plugin_applied,
++            $crate::commands::apply_claude_onboarding_skip,
++            $crate::commands::clear_claude_onboarding_skip,
++            // Claude MCP management
++            $crate::commands::get_claude_mcp_status,
++            $crate::commands::read_claude_mcp_config,
++            $crate::commands::upsert_claude_mcp_server,
++            $crate::commands::delete_claude_mcp_server,
++            $crate::commands::validate_mcp_command,
++            // usage query
++            $crate::commands::testUsageScript,
++            // subscription quota
++            $crate::commands::get_codex_oauth_quota,
++            $crate::commands::get_codex_oauth_models,
++            $crate::commands::get_coding_plan_quota,
++            $crate::commands::get_balance,
++            // New MCP via config.json (SSOT)
++            $crate::commands::get_mcp_config,
++            $crate::commands::upsert_mcp_server_in_config,
++            $crate::commands::delete_mcp_server_in_config,
++            $crate::commands::set_mcp_enabled,
++            // Unified MCP management
++            $crate::commands::get_mcp_servers,
++            $crate::commands::upsert_mcp_server,
++            $crate::commands::delete_mcp_server,
++            $crate::commands::toggle_mcp_app,
++            $crate::commands::import_mcp_from_apps,
++            // Prompt management
++            $crate::commands::get_prompts,
++            $crate::commands::upsert_prompt,
++            $crate::commands::delete_prompt,
++            $crate::commands::enable_prompt,
++            $crate::commands::import_prompt_from_file,
++            $crate::commands::get_current_prompt_file_content,
++            // Profile management (项目配置方案)
++            $crate::commands::list_profiles,
++            $crate::commands::create_profile,
++            $crate::commands::update_profile,
++            $crate::commands::delete_profile,
++            $crate::commands::clear_current_profile,
++            // model list fetch (OpenAI-compatible /v1/models)
++            $crate::commands::fetch_models_for_config,
++            // ours: endpoint speed test + custom endpoint management
++            $crate::commands::test_api_endpoints,
++            $crate::commands::get_custom_endpoints,
++            $crate::commands::add_custom_endpoint,
++            $crate::commands::remove_custom_endpoint,
++            $crate::commands::update_endpoint_last_used,
++            // app_config_dir override via Store
++            // provider sort order management
++            $crate::commands::update_providers_sort_order,
++            // theirs: config import/export and dialogs
++            $crate::commands::export_config_to_file,
++            $crate::commands::import_config_from_file,
++            $crate::commands::webdav_test_connection,
++            $crate::commands::webdav_sync_upload,
++            $crate::commands::webdav_sync_download,
++            $crate::commands::webdav_sync_save_settings,
++            $crate::commands::webdav_sync_fetch_remote_info,
++            $crate::commands::s3_test_connection,
++            $crate::commands::s3_sync_upload,
++            $crate::commands::s3_sync_download,
++            $crate::commands::s3_sync_save_settings,
++            $crate::commands::s3_sync_fetch_remote_info,
++            $crate::commands::save_file_dialog,
++            $crate::commands::open_file_dialog,
++            $crate::commands::open_zip_file_dialog,
++            $crate::commands::create_db_backup,
++            $crate::commands::list_db_backups,
++            $crate::commands::restore_db_backup,
++            $crate::commands::rename_db_backup,
++            $crate::commands::delete_db_backup,
++            $crate::commands::sync_current_providers_live,
++            // Deep link import
++            $crate::commands::parse_deeplink,
++            $crate::commands::merge_deeplink_config,
++            $crate::commands::import_from_deeplink,
++            $crate::commands::import_from_deeplink_unified,
++            // Environment variable management
++            $crate::commands::check_env_conflicts,
++            $crate::commands::delete_env_vars,
++            $crate::commands::restore_env_backup,
++            // Skill management (v3.10.0+ unified)
++            $crate::commands::get_installed_skills,
++            $crate::commands::get_skill_backups,
++            $crate::commands::delete_skill_backup,
++            $crate::commands::install_skill_unified,
++            $crate::commands::uninstall_skill_unified,
++            $crate::commands::restore_skill_backup,
++            $crate::commands::toggle_skill_app,
++            $crate::commands::scan_unmanaged_skills,
++            $crate::commands::import_skills_from_apps,
++            $crate::commands::discover_available_skills,
++            $crate::commands::check_skill_updates,
++            $crate::commands::update_skill,
++            $crate::commands::migrate_skill_storage,
++            $crate::commands::search_skills_sh,
++            // Skill management (legacy API compatibility)
++            $crate::commands::get_skills,
++            $crate::commands::get_skills_for_app,
++            $crate::commands::install_skill,
++            $crate::commands::install_skill_for_app,
++            $crate::commands::uninstall_skill,
++            $crate::commands::uninstall_skill_for_app,
++            $crate::commands::get_skill_repos,
++            $crate::commands::add_skill_repo,
++            $crate::commands::remove_skill_repo,
++            $crate::commands::install_skills_from_zip,
++            // Auto launch
++            $crate::commands::set_auto_launch,
++            $crate::commands::get_auto_launch_status,
++            // Proxy server management
++            $crate::commands::start_proxy_server,
++            $crate::commands::stop_proxy_server,
++            $crate::commands::stop_proxy_with_restore,
++            $crate::commands::get_proxy_takeover_status,
++            $crate::commands::set_proxy_takeover_for_app,
++            $crate::commands::get_proxy_status,
++            $crate::commands::get_proxy_config,
++            $crate::commands::update_proxy_config,
++            // Global & Per-App Config
++            $crate::commands::get_global_proxy_config,
++            $crate::commands::update_global_proxy_config,
++            $crate::commands::get_proxy_config_for_app,
++            $crate::commands::update_proxy_config_for_app,
++            $crate::commands::get_default_cost_multiplier,
++            $crate::commands::set_default_cost_multiplier,
++            $crate::commands::get_pricing_model_source,
++            $crate::commands::set_pricing_model_source,
++            $crate::commands::is_proxy_running,
++            $crate::commands::is_live_takeover_active,
++            $crate::commands::switch_proxy_provider,
++            // Proxy failover commands
++            $crate::commands::get_provider_health,
++            $crate::commands::get_circuit_breaker_config,
++            $crate::commands::update_circuit_breaker_config,
++            $crate::commands::get_circuit_breaker_stats,
++            // Failover queue management
++            $crate::commands::get_failover_queue,
++            $crate::commands::get_available_providers_for_failover,
++            $crate::commands::add_to_failover_queue,
++            $crate::commands::remove_from_failover_queue,
++            $crate::commands::get_auto_failover_enabled,
++            // Usage statistics
++            $crate::commands::get_usage_summary,
++            $crate::commands::get_usage_summary_by_app,
++            $crate::commands::get_usage_trends,
++            $crate::commands::get_provider_stats,
++            $crate::commands::get_model_stats,
++            $crate::commands::get_request_logs,
++            $crate::commands::get_request_detail,
++            $crate::commands::get_model_pricing,
++            $crate::commands::update_model_pricing,
++            $crate::commands::delete_model_pricing,
++            $crate::commands::check_provider_limits,
++            // Session usage sync
++            $crate::commands::sync_session_usage,
++            $crate::commands::get_usage_data_sources,
++            // Stream health check
++            $crate::commands::stream_check_provider,
++            $crate::commands::stream_check_all_providers,
++            $crate::commands::get_stream_check_config,
++            $crate::commands::save_stream_check_config,
++            // Session manager
++            $crate::commands::list_sessions,
++            $crate::commands::get_session_messages,
++            $crate::commands::delete_session,
++            $crate::commands::delete_sessions,
++            $crate::commands::launch_session_terminal,
++            $crate::commands::get_tool_versions,
++            $crate::commands::run_tool_lifecycle_action,
++            $crate::commands::probe_tool_installations,
++            // Provider terminal
++            $crate::commands::open_provider_terminal,
++            // Universal Provider management
++            $crate::commands::get_universal_providers,
++            $crate::commands::get_universal_provider,
++            // OpenCode specific
++            $crate::commands::import_opencode_providers_from_live,
++            $crate::commands::get_opencode_live_provider_ids,
++            // OpenClaw specific
++            $crate::commands::import_openclaw_providers_from_live,
++            $crate::commands::get_openclaw_live_provider_ids,
++            $crate::commands::get_openclaw_live_provider,
++            $crate::commands::scan_openclaw_config_health,
++            $crate::commands::get_openclaw_default_model,
++            $crate::commands::set_openclaw_default_model,
++            $crate::commands::get_openclaw_model_catalog,
++            $crate::commands::set_openclaw_model_catalog,
++            $crate::commands::get_openclaw_agents_defaults,
++            $crate::commands::set_openclaw_agents_defaults,
++            $crate::commands::get_openclaw_env,
++            $crate::commands::set_openclaw_env,
++            $crate::commands::get_openclaw_tools,
++            $crate::commands::set_openclaw_tools,
++            // Hermes specific
++            $crate::commands::import_hermes_providers_from_live,
++            $crate::commands::get_hermes_live_provider_ids,
++            $crate::commands::get_hermes_live_provider,
++            $crate::commands::get_hermes_model_config,
++            $crate::commands::launch_hermes_dashboard,
++            $crate::commands::get_hermes_memory,
++            $crate::commands::set_hermes_memory,
++            $crate::commands::get_hermes_memory_limits,
++            $crate::commands::set_hermes_memory_enabled,
++            // Global upstream proxy
++            $crate::commands::get_global_proxy_url,
++            $crate::commands::set_global_proxy_url,
++            $crate::commands::test_proxy_url,
++            $crate::commands::get_upstream_proxy_status,
++            $crate::commands::scan_local_proxies,
++            // Window theme control
++            // Generic managed auth commands
++            $crate::commands::auth_start_login,
++            $crate::commands::auth_poll_for_account,
++            $crate::commands::auth_list_accounts,
++            $crate::commands::auth_get_status,
++            $crate::commands::auth_remove_account,
++            $crate::commands::auth_set_default_account,
++            $crate::commands::auth_logout,
++            // Copilot OAuth commands (multi-account support)
++            $crate::commands::copilot_start_device_flow,
++            $crate::commands::copilot_poll_for_auth,
++            $crate::commands::copilot_poll_for_account,
++            $crate::commands::copilot_list_accounts,
++            $crate::commands::copilot_remove_account,
++            $crate::commands::copilot_set_default_account,
++            $crate::commands::copilot_get_auth_status,
++            $crate::commands::copilot_logout,
++            $crate::commands::copilot_is_authenticated,
++            $crate::commands::copilot_get_token,
++            $crate::commands::copilot_get_token_for_account,
++            $crate::commands::copilot_get_models,
++            $crate::commands::copilot_get_models_for_account,
++            $crate::commands::copilot_get_usage,
++            $crate::commands::copilot_get_usage_for_account,
++            // OMO commands
++            $crate::commands::read_omo_local_file,
++            $crate::commands::get_current_omo_provider_id,
++            $crate::commands::disable_current_omo,
++            $crate::commands::read_omo_slim_local_file,
++            $crate::commands::get_current_omo_slim_provider_id,
++            $crate::commands::disable_current_omo_slim,
++            // Workspace files (OpenClaw)
++            $crate::commands::read_workspace_file,
++            $crate::commands::write_workspace_file,
++            // Daily memory files (OpenClaw workspace)
++            $crate::commands::list_daily_memory_files,
++            $crate::commands::read_daily_memory_file,
++            $crate::commands::write_daily_memory_file,
++            $crate::commands::delete_daily_memory_file,
++            $crate::commands::search_daily_memory_files,
++            // lightweight mode (for testing or low-resource environments)
++            $crate::commands::is_lightweight_mode,
++            $($extra),*
++        ])
++    };
++}
+ use tauri_plugin_deep_link::DeepLinkExt;
+ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+ 
+@@ -1198,331 +1519,36 @@ pub fn run() {
+ 
+             Ok(())
+         })
+-        .invoke_handler(tauri::generate_handler![
+-            commands::get_providers,
+-            commands::get_current_provider,
+-            commands::add_provider,
+-            commands::update_provider,
+-            commands::delete_provider,
+-            commands::remove_provider_from_live_config,
+-            commands::switch_provider,
+-            commands::import_default_config,
+-            commands::get_claude_desktop_status,
+-            commands::get_claude_desktop_default_routes,
+-            commands::import_claude_desktop_providers_from_claude,
+-            commands::ensure_claude_desktop_official_provider,
+-            commands::ensure_codex_official_provider,
+-            commands::get_claude_config_status,
+-            commands::get_config_status,
+-            commands::get_claude_code_config_path,
+-            commands::get_config_dir,
+-            commands::open_config_folder,
+-            commands::pick_directory,
+-            commands::open_external,
+-            commands::get_init_error,
+-            commands::get_migration_result,
+-            commands::get_skills_migration_result,
+-            commands::get_app_config_path,
+-            commands::open_app_config_folder,
+-            commands::get_claude_common_config_snippet,
+-            commands::set_claude_common_config_snippet,
+-            commands::get_common_config_snippet,
+-            commands::set_common_config_snippet,
+-            commands::update_toml_common_config_snippet,
+-            commands::extract_common_config_snippet,
+-            commands::read_live_provider_settings,
+-            commands::get_settings,
+-            commands::save_settings,
+-            commands::has_codex_unify_history_backup,
+-            commands::restore_codex_unified_history,
+-            commands::get_rectifier_config,
+-            commands::set_rectifier_config,
+-            commands::get_optimizer_config,
+-            commands::set_optimizer_config,
+-            commands::get_copilot_optimizer_config,
+-            commands::set_copilot_optimizer_config,
+-            commands::get_log_config,
+-            commands::set_log_config,
+-            commands::restart_app,
+-            commands::install_update_and_restart,
+-            commands::check_app_update_available,
+-            commands::check_for_updates,
+-            commands::is_portable_mode,
+-            commands::copy_text_to_clipboard,
+-            commands::get_claude_plugin_status,
+-            commands::read_claude_plugin_config,
+-            commands::apply_claude_plugin_config,
+-            commands::is_claude_plugin_applied,
+-            commands::apply_claude_onboarding_skip,
+-            commands::clear_claude_onboarding_skip,
+-            // Claude MCP management
+-            commands::get_claude_mcp_status,
+-            commands::read_claude_mcp_config,
+-            commands::upsert_claude_mcp_server,
+-            commands::delete_claude_mcp_server,
+-            commands::validate_mcp_command,
+-            // usage query
+-            commands::queryProviderUsage,
+-            commands::testUsageScript,
+-            // subscription quota
+-            commands::get_subscription_quota,
+-            commands::get_codex_oauth_quota,
+-            commands::get_codex_oauth_models,
+-            commands::get_coding_plan_quota,
+-            commands::get_balance,
+-            // New MCP via config.json (SSOT)
+-            commands::get_mcp_config,
+-            commands::upsert_mcp_server_in_config,
+-            commands::delete_mcp_server_in_config,
+-            commands::set_mcp_enabled,
+-            // Unified MCP management
+-            commands::get_mcp_servers,
+-            commands::upsert_mcp_server,
+-            commands::delete_mcp_server,
+-            commands::toggle_mcp_app,
+-            commands::import_mcp_from_apps,
+-            // Prompt management
+-            commands::get_prompts,
+-            commands::upsert_prompt,
+-            commands::delete_prompt,
+-            commands::enable_prompt,
+-            commands::import_prompt_from_file,
+-            commands::get_current_prompt_file_content,
+-            // Profile management (项目配置方案)
+-            commands::list_profiles,
+-            commands::create_profile,
+-            commands::update_profile,
+-            commands::delete_profile,
+-            commands::clear_current_profile,
+-            commands::apply_profile,
+-            // model list fetch (OpenAI-compatible /v1/models)
+-            commands::fetch_models_for_config,
+-            // ours: endpoint speed test + custom endpoint management
+-            commands::test_api_endpoints,
+-            commands::get_custom_endpoints,
+-            commands::add_custom_endpoint,
+-            commands::remove_custom_endpoint,
+-            commands::update_endpoint_last_used,
+-            // app_config_dir override via Store
+-            commands::get_app_config_dir_override,
+-            commands::set_app_config_dir_override,
+-            // provider sort order management
+-            commands::update_providers_sort_order,
+-            // theirs: config import/export and dialogs
+-            commands::export_config_to_file,
+-            commands::import_config_from_file,
+-            commands::webdav_test_connection,
+-            commands::webdav_sync_upload,
+-            commands::webdav_sync_download,
+-            commands::webdav_sync_save_settings,
+-            commands::webdav_sync_fetch_remote_info,
+-            commands::s3_test_connection,
+-            commands::s3_sync_upload,
+-            commands::s3_sync_download,
+-            commands::s3_sync_save_settings,
+-            commands::s3_sync_fetch_remote_info,
+-            commands::save_file_dialog,
+-            commands::open_file_dialog,
+-            commands::open_zip_file_dialog,
+-            commands::create_db_backup,
+-            commands::list_db_backups,
+-            commands::restore_db_backup,
+-            commands::rename_db_backup,
+-            commands::delete_db_backup,
+-            commands::sync_current_providers_live,
+-            // Deep link import
+-            commands::parse_deeplink,
+-            commands::merge_deeplink_config,
+-            commands::import_from_deeplink,
+-            commands::import_from_deeplink_unified,
+-            update_tray_menu,
+-            // Environment variable management
+-            commands::check_env_conflicts,
+-            commands::delete_env_vars,
+-            commands::restore_env_backup,
+-            // Skill management (v3.10.0+ unified)
+-            commands::get_installed_skills,
+-            commands::get_skill_backups,
+-            commands::delete_skill_backup,
+-            commands::install_skill_unified,
+-            commands::uninstall_skill_unified,
+-            commands::restore_skill_backup,
+-            commands::toggle_skill_app,
+-            commands::scan_unmanaged_skills,
+-            commands::import_skills_from_apps,
+-            commands::discover_available_skills,
+-            commands::check_skill_updates,
+-            commands::update_skill,
+-            commands::migrate_skill_storage,
+-            commands::search_skills_sh,
+-            // Skill management (legacy API compatibility)
+-            commands::get_skills,
+-            commands::get_skills_for_app,
+-            commands::install_skill,
+-            commands::install_skill_for_app,
+-            commands::uninstall_skill,
+-            commands::uninstall_skill_for_app,
+-            commands::get_skill_repos,
+-            commands::add_skill_repo,
+-            commands::remove_skill_repo,
+-            commands::install_skills_from_zip,
+-            // Auto launch
+-            commands::set_auto_launch,
+-            commands::get_auto_launch_status,
+-            // Proxy server management
+-            commands::start_proxy_server,
+-            commands::stop_proxy_server,
+-            commands::stop_proxy_with_restore,
+-            commands::get_proxy_takeover_status,
+-            commands::set_proxy_takeover_for_app,
+-            commands::get_proxy_status,
+-            commands::get_proxy_config,
+-            commands::update_proxy_config,
+-            // Global & Per-App Config
+-            commands::get_global_proxy_config,
+-            commands::update_global_proxy_config,
+-            commands::get_proxy_config_for_app,
+-            commands::update_proxy_config_for_app,
+-            commands::get_default_cost_multiplier,
+-            commands::set_default_cost_multiplier,
+-            commands::get_pricing_model_source,
+-            commands::set_pricing_model_source,
+-            commands::is_proxy_running,
+-            commands::is_live_takeover_active,
+-            commands::switch_proxy_provider,
+-            // Proxy failover commands
+-            commands::get_provider_health,
+-            commands::reset_circuit_breaker,
+-            commands::get_circuit_breaker_config,
+-            commands::update_circuit_breaker_config,
+-            commands::get_circuit_breaker_stats,
+-            // Failover queue management
+-            commands::get_failover_queue,
+-            commands::get_available_providers_for_failover,
+-            commands::add_to_failover_queue,
+-            commands::remove_from_failover_queue,
+-            commands::get_auto_failover_enabled,
+-            commands::set_auto_failover_enabled,
+-            // Usage statistics
+-            commands::get_usage_summary,
+-            commands::get_usage_summary_by_app,
+-            commands::get_usage_trends,
+-            commands::get_provider_stats,
+-            commands::get_model_stats,
+-            commands::get_request_logs,
+-            commands::get_request_detail,
+-            commands::get_model_pricing,
+-            commands::update_model_pricing,
+-            commands::delete_model_pricing,
+-            commands::check_provider_limits,
+-            // Session usage sync
+-            commands::sync_session_usage,
+-            commands::get_usage_data_sources,
+-            // Stream health check
+-            commands::stream_check_provider,
+-            commands::stream_check_all_providers,
+-            commands::get_stream_check_config,
+-            commands::save_stream_check_config,
+-            // Session manager
+-            commands::list_sessions,
+-            commands::get_session_messages,
+-            commands::delete_session,
+-            commands::delete_sessions,
+-            commands::launch_session_terminal,
+-            commands::get_tool_versions,
+-            commands::run_tool_lifecycle_action,
+-            commands::probe_tool_installations,
+-            // Provider terminal
+-            commands::open_provider_terminal,
+-            // Universal Provider management
+-            commands::get_universal_providers,
+-            commands::get_universal_provider,
+-            commands::upsert_universal_provider,
+-            commands::delete_universal_provider,
+-            commands::sync_universal_provider,
+-            // OpenCode specific
+-            commands::import_opencode_providers_from_live,
+-            commands::get_opencode_live_provider_ids,
+-            // OpenClaw specific
+-            commands::import_openclaw_providers_from_live,
+-            commands::get_openclaw_live_provider_ids,
+-            commands::get_openclaw_live_provider,
+-            commands::scan_openclaw_config_health,
+-            commands::get_openclaw_default_model,
+-            commands::set_openclaw_default_model,
+-            commands::get_openclaw_model_catalog,
+-            commands::set_openclaw_model_catalog,
+-            commands::get_openclaw_agents_defaults,
+-            commands::set_openclaw_agents_defaults,
+-            commands::get_openclaw_env,
+-            commands::set_openclaw_env,
+-            commands::get_openclaw_tools,
+-            commands::set_openclaw_tools,
+-            // Hermes specific
+-            commands::import_hermes_providers_from_live,
+-            commands::get_hermes_live_provider_ids,
+-            commands::get_hermes_live_provider,
+-            commands::get_hermes_model_config,
+-            commands::open_hermes_web_ui,
+-            commands::launch_hermes_dashboard,
+-            commands::get_hermes_memory,
+-            commands::set_hermes_memory,
+-            commands::get_hermes_memory_limits,
+-            commands::set_hermes_memory_enabled,
+-            // Global upstream proxy
+-            commands::get_global_proxy_url,
+-            commands::set_global_proxy_url,
+-            commands::test_proxy_url,
+-            commands::get_upstream_proxy_status,
+-            commands::scan_local_proxies,
+-            // Window theme control
+-            commands::set_window_theme,
+-            // Generic managed auth commands
+-            commands::auth_start_login,
+-            commands::auth_poll_for_account,
+-            commands::auth_list_accounts,
+-            commands::auth_get_status,
+-            commands::auth_remove_account,
+-            commands::auth_set_default_account,
+-            commands::auth_logout,
+-            // Copilot OAuth commands (multi-account support)
+-            commands::copilot_start_device_flow,
+-            commands::copilot_poll_for_auth,
+-            commands::copilot_poll_for_account,
+-            commands::copilot_list_accounts,
+-            commands::copilot_remove_account,
+-            commands::copilot_set_default_account,
+-            commands::copilot_get_auth_status,
+-            commands::copilot_logout,
+-            commands::copilot_is_authenticated,
+-            commands::copilot_get_token,
+-            commands::copilot_get_token_for_account,
+-            commands::copilot_get_models,
+-            commands::copilot_get_models_for_account,
+-            commands::copilot_get_usage,
+-            commands::copilot_get_usage_for_account,
+-            // OMO commands
+-            commands::read_omo_local_file,
+-            commands::get_current_omo_provider_id,
+-            commands::disable_current_omo,
+-            commands::read_omo_slim_local_file,
+-            commands::get_current_omo_slim_provider_id,
+-            commands::disable_current_omo_slim,
+-            // Workspace files (OpenClaw)
+-            commands::read_workspace_file,
+-            commands::write_workspace_file,
+-            // Daily memory files (OpenClaw workspace)
+-            commands::list_daily_memory_files,
+-            commands::read_daily_memory_file,
+-            commands::write_daily_memory_file,
+-            commands::delete_daily_memory_file,
+-            commands::search_daily_memory_files,
+-            commands::open_workspace_directory,
+-            // lightweight mode (for testing or low-resource environments)
+-            commands::enter_lightweight_mode,
+-            commands::exit_lightweight_mode,
+-            commands::is_lightweight_mode,
+-        ]);
++        ;
++
++    // GUI 专属命令（签名使用具体 Wry `AppHandle`/`Window`，无头模式不可用）在此追加
++    let builder = crate::invoke_handler_with_all_commands!(
++        builder,
++        commands::queryProviderUsage,
++        commands::get_subscription_quota,
++        commands::pick_directory,
++        commands::apply_profile,
++        commands::get_app_config_dir_override,
++        commands::set_app_config_dir_override,
++        commands::restart_app,
++        commands::install_update_and_restart,
++        commands::check_app_update_available,
++        update_tray_menu,
++        commands::set_auto_failover_enabled,
++        commands::reset_circuit_breaker,
++        commands::upsert_universal_provider,
++        commands::delete_universal_provider,
++        commands::sync_universal_provider,
++        commands::open_hermes_web_ui,
++        commands::enter_lightweight_mode,
++        commands::exit_lightweight_mode,
++        commands::open_external,
++        commands::set_window_theme,
++        commands::open_config_folder,
++        commands::open_app_config_folder,
++        commands::check_for_updates,
++        commands::open_workspace_directory,
++    );
+ 
+     let app = builder
+         .build(tauri::generate_context!())
+diff --git a/src-tauri/src/usage_events.rs b/src-tauri/src/usage_events.rs
+index d5487bfe..b07dc0da 100644
+--- a/src-tauri/src/usage_events.rs
++++ b/src-tauri/src/usage_events.rs
+@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
+ use std::sync::OnceLock;
+ use std::time::Duration;
+ 
+-use tauri::{AppHandle, Emitter};
++use tauri::{AppHandle, Emitter, Runtime};
+ 
+ /// 前端监听的事件名
+ pub const EVENT_USAGE_LOG_RECORDED: &str = "usage-log-recorded";
+@@ -22,7 +22,10 @@ pub const EVENT_USAGE_LOG_RECORDED: &str = "usage-log-recorded";
+ /// 防抖窗口：合并 200ms 内的多次通知。
+ const DEBOUNCE_WINDOW: Duration = Duration::from_millis(200);
+ 
+-static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
++/// 事件发射闭包：由 init 注入，持有具体 Runtime 的 AppHandle。
++/// 使用闭包而非 `OnceLock<AppHandle>`（默认 Wry 类型），
++/// 以便无头 Web 模式（MockRuntime）也能注入。
++static EMITTER: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+ 
+ /// 防抖标记：true 表示已有调度任务在等待 emit，后续通知合并到该任务。
+ static EMIT_SCHEDULED: AtomicBool = AtomicBool::new(false);
+@@ -31,8 +34,13 @@ static EMIT_SCHEDULED: AtomicBool = AtomicBool::new(false);
+ ///
+ /// 重复调用是无害的（OnceLock 仅首次写入生效），但应用启动期只该被
+ /// `lib.rs::run` 调一次。
+-pub fn init(handle: AppHandle) {
+-    if APP_HANDLE.set(handle).is_err() {
++pub fn init<R: Runtime>(handle: AppHandle<R>) {
++    let emitter = Box::new(move || {
++        if let Err(e) = handle.emit(EVENT_USAGE_LOG_RECORDED, ()) {
++            log::warn!("emit {EVENT_USAGE_LOG_RECORDED} 失败: {e}");
++        }
++    });
++    if EMITTER.set(emitter).is_err() {
+         log::debug!("usage_events::init 重复调用，已忽略");
+     } else {
+         log::info!("[usage-event] AppHandle 已注入，事件推送启用");
+@@ -45,7 +53,7 @@ pub fn init(handle: AppHandle) {
+ /// 内部 200ms 防抖合并，绝不阻塞调用线程。
+ pub fn notify_log_recorded() {
+     // AppHandle 未注入（典型出现在单元测试或 setup 之前）：直接放弃。
+-    let Some(handle) = APP_HANDLE.get() else {
++    let Some(emitter) = EMITTER.get() else {
+         return;
+     };
+ 
+@@ -54,15 +62,12 @@ pub fn notify_log_recorded() {
+         return;
+     }
+ 
+-    let handle = handle.clone();
+     std::thread::spawn(move || {
+         std::thread::sleep(DEBOUNCE_WINDOW);
+         // 必须先清标志再 emit：万一 emit 期间又有新通知进来，
+         // 下一轮防抖窗口会重新调度，不会丢失。
+         EMIT_SCHEDULED.store(false, Ordering::Release);
+ 
+-        if let Err(e) = handle.emit(EVENT_USAGE_LOG_RECORDED, ()) {
+-            log::warn!("emit {EVENT_USAGE_LOG_RECORDED} 失败: {e}");
+-        }
++        emitter();
+     });
+ }

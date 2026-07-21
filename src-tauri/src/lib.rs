@@ -25,10 +25,15 @@ mod model_capabilities;
 mod openclaw_config;
 mod opencode_config;
 mod panic_hook;
+mod platform_tauri;
 mod prompt;
 mod prompt_files;
-mod provider;
-mod provider_defaults;
+pub mod provider {
+    pub use cc_switch_core::provider::*;
+}
+pub mod provider_defaults {
+    pub use cc_switch_core::provider_defaults::*;
+}
 mod proxy;
 mod services;
 mod session_manager;
@@ -44,7 +49,7 @@ pub use codex_config::{get_codex_auth_path, get_codex_config_path, write_codex_l
 pub use commands::open_provider_terminal;
 pub use commands::*;
 pub use config::{get_claude_mcp_path, get_claude_settings_path, read_json_file};
-pub use database::{Database, Profile};
+pub use database::{Database, FailoverQueueItem, Profile};
 pub use deeplink::{import_provider_from_deeplink, parse_deeplink_url, DeepLinkImportRequest};
 pub use error::AppError;
 pub use mcp::{
@@ -320,6 +325,13 @@ pub fn run() {
 
             // 预先刷新 Store 覆盖配置，确保后续路径读取正确（日志/数据库等）
             app_store::refresh_app_config_dir_override(app.handle());
+            cc_switch_core::set_app_config_dir_override(cc_switch_core::get_app_config_dir_override());
+
+            // 注：完整的 cc-switch-core 初始化（含 SQLite Database 打开）在
+            // 下方的 `let core_state = loop { ... cc_switch_core::init(None, Some(...)) }`
+            // 完成。这里只设置 app_config_dir override；数据库初始化需要
+            // 在 dialog 重试循环中完成（用户可能在弹窗里改路径）。
+
             panic_hook::init_app_config_dir(crate::config::get_app_config_dir());
             #[cfg(target_os = "windows")]
             set_windows_app_user_model_id(app.handle());
@@ -449,9 +461,18 @@ pub fn run() {
                 }
             }
 
-            let db = loop {
-                match crate::database::Database::init() {
-                    Ok(db) => break Arc::new(db),
+            let core_state = loop {
+                match cc_switch_core::init(
+                    None,
+                    Some(Box::new(|table| {
+                        crate::services::webdav_auto_sync::notify_db_changed(table);
+                        crate::services::s3_auto_sync::notify_db_changed(table);
+                        if table == "proxy_request_logs" || table == "usage_daily_rollups" {
+                            crate::usage_events::notify_log_recorded();
+                        }
+                    })),
+                ) {
+                    Ok(state) => break state,
                     Err(e) => {
                         log::error!("Failed to init database: {e}");
 
@@ -465,6 +486,7 @@ pub fn run() {
                     }
                 }
             };
+            let db = core_state.db;
 
             // 如果有预加载的配置，执行迁移
             if let Some(config) = migration_config {
@@ -492,8 +514,26 @@ pub fn run() {
 
             let app_state = AppState::new(db);
 
-            // 设置 AppHandle 用于代理故障转移时的 UI 更新
-            app_state.proxy_service.set_app_handle(app.handle().clone());
+            // 创建核心 ProxyAuthState，并与 Tauri 命令状态共享同一 Manager 实例
+            let proxy_auth_state = cc_switch_core::proxy::state::ProxyAuthState::new();
+            let copilot_auth_state =
+                crate::commands::copilot::CopilotAuthState(proxy_auth_state.copilot.clone());
+            let codex_oauth_state =
+                crate::commands::codex_oauth::CodexOAuthState(proxy_auth_state.codex_oauth.clone());
+            app.manage(copilot_auth_state);
+            app.manage(codex_oauth_state);
+
+            // 设置 Platform 用于代理故障转移时的 UI 事件发射
+            app_state.proxy_service.set_platform(std::sync::Arc::new(
+                crate::platform_tauri::TauriPlatform::new(app.handle().clone()),
+            ));
+
+            // 注入使用量日志回调，将 core 的写入事件转发到 Tauri 前端
+            app_state
+                .proxy_service
+                .set_usage_log_callback(std::sync::Arc::new(|| {
+                    crate::usage_events::notify_log_recorded();
+                }));
 
             // ============================================================
             // 按表独立判断的导入逻辑（各类数据独立检查，互不影响）
@@ -956,14 +996,17 @@ pub fn run() {
             let _tray = tray_builder.build(app)?;
             crate::services::webdav_auto_sync::start_worker(
                 app_state.db.clone(),
-                app.handle().clone(),
+                Arc::new(crate::platform_tauri::TauriPlatform::new(app.handle().clone())),
             );
             crate::services::s3_auto_sync::start_worker(
                 app_state.db.clone(),
-                app.handle().clone(),
+                Arc::new(crate::platform_tauri::TauriPlatform::new(app.handle().clone())),
             );
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             app.manage(app_state);
+
+            // 注入平台抽象层（POC）
+            app.manage(platform_tauri::TauriPlatform::new(app.handle().clone()));
 
             // 从数据库加载日志配置并应用
             {
@@ -981,30 +1024,6 @@ pub fn run() {
             // 初始化 SkillService
             let skill_service = SkillService::new();
             app.manage(commands::skill::SkillServiceState(Arc::new(skill_service)));
-
-            // 初始化 CopilotAuthManager
-            {
-                use crate::proxy::providers::copilot_auth::CopilotAuthManager;
-                use commands::CopilotAuthState;
-                use tokio::sync::RwLock;
-
-                let app_config_dir = crate::config::get_app_config_dir();
-                let copilot_auth_manager = CopilotAuthManager::new(app_config_dir);
-                app.manage(CopilotAuthState(Arc::new(RwLock::new(copilot_auth_manager))));
-                log::info!("✓ CopilotAuthManager initialized");
-            }
-
-            // 初始化 CodexOAuthManager (ChatGPT Plus/Pro 反代)
-            {
-                use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
-                use commands::CodexOAuthState;
-                use tokio::sync::RwLock;
-
-                let app_config_dir = crate::config::get_app_config_dir();
-                let codex_oauth_manager = CodexOAuthManager::new(app_config_dir);
-                app.manage(CodexOAuthState(Arc::new(RwLock::new(codex_oauth_manager))));
-                log::info!("✓ CodexOAuthManager initialized");
-            }
 
             // 初始化全局出站代理 HTTP 客户端
             {

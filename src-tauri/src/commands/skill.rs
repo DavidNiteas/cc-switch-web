@@ -8,16 +8,13 @@ use crate::app_config::{AppType, InstalledSkill, UnmanagedSkill};
 use crate::error::format_skill_error;
 use crate::services::skill::{
     DiscoverableSkill, ImportSkillSelection, MigrationResult, Skill, SkillBackupEntry, SkillRepo,
-    SkillService, SkillStorageLocation, SkillUninstallResult, SkillUpdateInfo,
+    SkillService, SkillServiceState, SkillUninstallResult, SkillUpdateInfo,
     SkillsShSearchResult,
 };
 use crate::store::AppState;
 use std::str::FromStr;
 use std::sync::Arc;
 use tauri::State;
-
-/// SkillService 状态包装
-pub struct SkillServiceState(pub Arc<SkillService>);
 
 /// 解析 app 参数为 AppType
 fn parse_app_type(app: &str) -> Result<AppType, String> {
@@ -29,17 +26,17 @@ fn parse_app_type(app: &str) -> Result<AppType, String> {
 /// 获取所有已安装的 Skills
 #[tauri::command]
 pub fn get_installed_skills(app_state: State<'_, AppState>) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::get_all_installed(&app_state.db).map_err(|e| e.to_string())
+    cc_switch_core::commands::skill::get_installed_skills(&app_state.db).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn get_skill_backups() -> Result<Vec<SkillBackupEntry>, String> {
-    SkillService::list_backups().map_err(|e| e.to_string())
+    cc_switch_core::commands::skill::get_skill_backups().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_skill_backup(backup_id: String) -> Result<bool, String> {
-    SkillService::delete_backup(&backup_id).map_err(|e| e.to_string())?;
+    cc_switch_core::commands::skill::delete_skill_backup(&backup_id).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -70,7 +67,8 @@ pub fn uninstall_skill_unified(
     id: String,
     app_state: State<'_, AppState>,
 ) -> Result<SkillUninstallResult, String> {
-    SkillService::uninstall(&app_state.db, &id).map_err(|e| e.to_string())
+    cc_switch_core::commands::skill::uninstall_skill_unified(&app_state.db, &id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -92,8 +90,8 @@ pub fn toggle_skill_app(
     enabled: bool,
     app_state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let app_type = parse_app_type(&app)?;
-    SkillService::toggle_app(&app_state.db, &id, &app_type, enabled).map_err(|e| e.to_string())?;
+    cc_switch_core::commands::skill::toggle_skill_app(&app_state.db, &id, &app, enabled)
+        .map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -102,7 +100,7 @@ pub fn toggle_skill_app(
 pub fn scan_unmanaged_skills(
     app_state: State<'_, AppState>,
 ) -> Result<Vec<UnmanagedSkill>, String> {
-    SkillService::scan_unmanaged(&app_state.db).map_err(|e| e.to_string())
+    cc_switch_core::commands::skill::scan_unmanaged_skills(&app_state.db).map_err(|e| e.to_string())
 }
 
 /// 从应用目录导入 Skills
@@ -111,7 +109,8 @@ pub fn import_skills_from_apps(
     imports: Vec<ImportSkillSelection>,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::import_from_apps(&app_state.db, imports).map_err(|e| e.to_string())
+    cc_switch_core::commands::skill::import_skills_from_apps(&app_state.db, imports)
+        .map_err(|e| e.to_string())
 }
 
 // ========== 发现功能命令 ==========
@@ -159,11 +158,12 @@ pub async fn update_skill(
 
 /// 迁移 Skill 存储位置
 #[tauri::command]
-pub async fn migrate_skill_storage(
-    target: SkillStorageLocation,
+pub fn migrate_skill_storage(
+    target: crate::services::skill::SkillStorageLocation,
     app_state: State<'_, AppState>,
 ) -> Result<MigrationResult, String> {
-    SkillService::migrate_storage(&app_state.db, target).map_err(|e| e.to_string())
+    cc_switch_core::commands::skill::migrate_skill_storage(&app_state.db, target)
+        .map_err(|e| e.to_string())
 }
 
 /// 搜索 skills.sh 公共目录
@@ -280,14 +280,16 @@ pub fn uninstall_skill_for_app(
     let _ = parse_app_type(&app)?; // 验证参数
 
     // 通过 directory 找到对应的 skill id
-    let skills = SkillService::get_all_installed(&app_state.db).map_err(|e| e.to_string())?;
+    let skills = cc_switch_core::commands::skill::get_installed_skills(&app_state.db)
+        .map_err(|e| e.to_string())?;
 
     let skill = skills
         .into_iter()
         .find(|s| s.directory.eq_ignore_ascii_case(&directory))
         .ok_or_else(|| format!("未找到已安装的 Skill: {directory}"))?;
 
-    SkillService::uninstall(&app_state.db, &skill.id).map_err(|e| e.to_string())
+    cc_switch_core::commands::skill::uninstall_skill_unified(&app_state.db, &skill.id)
+        .map_err(|e| e.to_string())
 }
 
 // ========== 仓库管理命令 ==========
@@ -295,16 +297,13 @@ pub fn uninstall_skill_for_app(
 /// 获取技能仓库列表
 #[tauri::command]
 pub fn get_skill_repos(app_state: State<'_, AppState>) -> Result<Vec<SkillRepo>, String> {
-    app_state.db.get_skill_repos().map_err(|e| e.to_string())
+    cc_switch_core::commands::skill::get_skill_repos(&app_state.db).map_err(|e| e.to_string())
 }
 
 /// 添加技能仓库
 #[tauri::command]
 pub fn add_skill_repo(repo: SkillRepo, app_state: State<'_, AppState>) -> Result<bool, String> {
-    app_state
-        .db
-        .save_skill_repo(&repo)
-        .map_err(|e| e.to_string())?;
+    cc_switch_core::commands::skill::add_skill_repo(&app_state.db, repo).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -315,9 +314,7 @@ pub fn remove_skill_repo(
     name: String,
     app_state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    app_state
-        .db
-        .delete_skill_repo(&owner, &name)
+    cc_switch_core::commands::skill::remove_skill_repo(&app_state.db, &owner, &name)
         .map_err(|e| e.to_string())?;
     Ok(true)
 }
@@ -329,8 +326,6 @@ pub fn install_skills_from_zip(
     current_app: String,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    let app_type = parse_app_type(&current_app)?;
-    let path = std::path::Path::new(&file_path);
-
-    SkillService::install_from_zip(&app_state.db, path, &app_type).map_err(|e| e.to_string())
+    cc_switch_core::commands::skill::install_skills_from_zip(&app_state.db, &file_path, &current_app)
+        .map_err(|e| e.to_string())
 }

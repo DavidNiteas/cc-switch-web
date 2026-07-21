@@ -86,20 +86,19 @@ pub async fn stream_check_all_providers(
 
         let base_url_override =
             resolve_copilot_base_url_override(&provider, &copilot_state).await?;
-        let result =
-            StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
-                .await
-                .unwrap_or_else(|e| StreamCheckResult {
-                    status: HealthStatus::Failed,
-                    success: false,
-                    message: e.to_string(),
-                    response_time_ms: None,
-                    http_status: None,
-                    model_used: String::new(),
-                    tested_at: chrono::Utc::now().timestamp(),
-                    retry_count: 0,
-                    error_category: None,
-                });
+        let result = StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
+            .await
+            .unwrap_or_else(|e| StreamCheckResult {
+                status: HealthStatus::Failed,
+                success: false,
+                message: e.to_string(),
+                response_time_ms: None,
+                http_status: None,
+                model_used: String::new(),
+                tested_at: chrono::Utc::now().timestamp(),
+                retry_count: 0,
+                error_category: None,
+            });
 
         let _ = state
             .db
@@ -114,7 +113,7 @@ pub async fn stream_check_all_providers(
 /// 获取连通性检查配置
 #[tauri::command]
 pub fn get_stream_check_config(state: State<'_, AppState>) -> Result<StreamCheckConfig, AppError> {
-    state.db.get_stream_check_config()
+    cc_switch_core::commands::stream_check::get_stream_check_config(&state.db)
 }
 
 /// 保存连通性检查配置
@@ -123,7 +122,7 @@ pub fn save_stream_check_config(
     state: State<'_, AppState>,
     config: StreamCheckConfig,
 ) -> Result<(), AppError> {
-    state.db.save_stream_check_config(&config)
+    cc_switch_core::commands::stream_check::save_stream_check_config(&state.db, config)
 }
 
 /// Copilot 供应商的 base_url 需要从 OAuth 管理器动态解析（按账号或默认端点）。

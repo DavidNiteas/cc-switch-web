@@ -1,6 +1,5 @@
 use serde_json::Value;
 use std::path::PathBuf;
-use std::sync::{OnceLock, RwLock};
 use tauri_plugin_store::StoreExt;
 
 use crate::error::AppError;
@@ -8,24 +7,7 @@ use crate::error::AppError;
 /// Store 中的键名
 const STORE_KEY_APP_CONFIG_DIR: &str = "app_config_dir_override";
 
-/// 缓存当前的 app_config_dir 覆盖路径，避免存储 AppHandle
-static APP_CONFIG_DIR_OVERRIDE: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
-
-fn override_cache() -> &'static RwLock<Option<PathBuf>> {
-    APP_CONFIG_DIR_OVERRIDE.get_or_init(|| RwLock::new(None))
-}
-
-fn update_cached_override(value: Option<PathBuf>) {
-    if let Ok(mut guard) = override_cache().write() {
-        *guard = value;
-    }
-}
-
-/// 获取缓存中的 app_config_dir 覆盖路径
-pub fn get_app_config_dir_override() -> Option<PathBuf> {
-    override_cache().read().ok()?.clone()
-}
-
+/// 从 Tauri Store 读取覆盖路径并更新 core 内存缓存
 fn read_override_from_store(app: &tauri::AppHandle) -> Option<PathBuf> {
     let store = match app.store_builder("app_paths.json").build() {
         Ok(store) => store,
@@ -63,10 +45,10 @@ fn read_override_from_store(app: &tauri::AppHandle) -> Option<PathBuf> {
     }
 }
 
-/// 从 Store 刷新 app_config_dir 覆盖值并更新缓存
+/// 从 Store 刷新 app_config_dir 覆盖值并同步到 core 内存缓存
 pub fn refresh_app_config_dir_override(app: &tauri::AppHandle) -> Option<PathBuf> {
     let value = read_override_from_store(app);
-    update_cached_override(value.clone());
+    cc_switch_core::set_app_config_dir_override(value.clone());
     value
 }
 

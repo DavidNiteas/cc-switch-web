@@ -1,0 +1,12 @@
+[workspace]
+members = ["src-tauri", "src-core", "src-web"]
+resolver = "2"
+
+# 优化 release 二进制体积，帮助减小 AppImage 体积
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+# 使用 unwind 以便 panic hook 能捕获 backtrace（abort 会直接终止无法捕获）
+panic = "unwind"
+strip = "symbols"

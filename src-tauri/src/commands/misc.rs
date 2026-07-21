@@ -2,13 +2,13 @@
 
 use crate::app_config::AppType;
 use crate::init_status::{InitErrorPayload, SkillsMigrationPayload};
+use crate::platform_tauri::TauriPlatform;
 use crate::services::ProviderService;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use tauri::AppHandle;
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
@@ -20,34 +20,23 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// 打开外部链接
 #[tauri::command]
-pub async fn open_external(app: AppHandle, url: String) -> Result<bool, String> {
-    let url = if url.starts_with("http://") || url.starts_with("https://") {
-        url
-    } else {
-        format!("https://{url}")
-    };
-
-    app.opener()
-        .open_url(&url, None::<String>)
-        .map_err(|e| format!("打开链接失败: {e}"))?;
-
-    Ok(true)
+pub async fn open_external(
+    platform: State<'_, TauriPlatform>,
+    url: String,
+) -> Result<bool, String> {
+    cc_switch_core::commands::misc::open_external(&*platform, url)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn copy_text_to_clipboard(text: String) -> Result<bool, String> {
-    // Use spawn_blocking to avoid blocking the async runtime
-    // Clipboard access can block on some platforms and may have thread/loop constraints
-    tokio::task::spawn_blocking(move || {
-        let mut clipboard =
-            arboard::Clipboard::new().map_err(|e| format!("访问系统剪贴板失败: {e}"))?;
-        clipboard
-            .set_text(text)
-            .map_err(|e| format!("写入系统剪贴板失败: {e}"))?;
-        Ok(true)
-    })
-    .await
-    .map_err(|e| format!("剪贴板任务执行失败: {e}"))?
+pub async fn copy_text_to_clipboard(
+    platform: State<'_, TauriPlatform>,
+    text: String,
+) -> Result<bool, String> {
+    cc_switch_core::commands::misc::copy_text_to_clipboard(&*platform, text)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 检查更新
@@ -67,19 +56,14 @@ pub async fn check_for_updates(handle: AppHandle) -> Result<bool, String> {
 /// 判断是否为便携版（绿色版）运行
 #[tauri::command]
 pub async fn is_portable_mode() -> Result<bool, String> {
-    let exe_path = std::env::current_exe().map_err(|e| format!("获取可执行路径失败: {e}"))?;
-    if let Some(dir) = exe_path.parent() {
-        Ok(dir.join("portable.ini").is_file())
-    } else {
-        Ok(false)
-    }
+    cc_switch_core::commands::misc::is_portable_mode().map_err(|e| e.to_string())
 }
 
 /// 获取应用启动阶段的初始化错误（若有）。
 /// 用于前端在早期主动拉取，避免事件订阅竞态导致的提示缺失。
 #[tauri::command]
 pub async fn get_init_error() -> Result<Option<InitErrorPayload>, String> {
-    Ok(crate::init_status::get_init_error())
+    cc_switch_core::commands::misc::get_init_error_command().map_err(|e| e.to_string())
 }
 
 /// 获取 JSON→SQLite 迁移结果（若有）。

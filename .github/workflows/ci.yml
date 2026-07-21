@@ -75,7 +75,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev \
-            libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev
+            libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libdbus-1-dev
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
             || sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev
           sudo apt-get install -y --no-install-recommends libsoup-3.0-dev \
@@ -93,13 +93,20 @@ jobs:
 
       - name: Create frontend dist placeholder
         shell: bash
-        run: mkdir -p dist
+        run: mkdir -p dist dist-web
 
       - name: Check Rust formatting
-        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+        run: cargo fmt --check
 
       - name: Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --workspace --all-targets
+
+      - name: Verify headless web crate has no Tauri/GTK dependency
+        if: runner.os == 'Linux'
+        run: |
+          cargo tree -p cc-switch-web -i tauri 2>&1 | grep -q "did not match" || exit 1
+          cargo tree -p cc-switch-web -i gtk 2>&1 | grep -q "did not match" || exit 1
+          cargo tree -p cc-switch-web -i webkit2gtk 2>&1 | grep -q "did not match" || exit 1

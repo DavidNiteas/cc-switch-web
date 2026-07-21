@@ -36,6 +36,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-window-state = "2"
+cc-switch-core = { path = "../src-core" }
 dirs = "5.0"
 toml = "0.8"
 toml_edit = "0.22"
@@ -99,15 +100,6 @@ rquickjs = { version = "0.8", features = ["bindgen"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
 objc2-app-kit = { version = "0.2", features = ["NSColor"] }
-
-# Optimize release binary size to help reduce AppImage footprint
-[profile.release]
-codegen-units = 1
-lto = "thin"
-opt-level = "s"
-# 使用 unwind 以便 panic hook 能捕获 backtrace（abort 会直接终止无法捕获）
-panic = "unwind"
-strip = "symbols"
 
 [dev-dependencies]
 serial_test = "3"

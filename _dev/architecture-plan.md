@@ -1,110 +1,175 @@
-# cc-switch-web 改造架构计划
+# cc-switch-web 改造架构计划（修订版）
 
-## 核心目标
+> 更新时间：2026-07-20  
+> 本版本替代 2026-07 初稿。初稿基于"MockRuntime + feature 分层"假设，经实验验证不可行，已转向"Core + Tauri + Web 三层分离"架构。
 
-在不改动 cc-switch 原有 GUI 和业务功能的前提下，实现后端与前端的彻底解耦：
+## 核心结论与转向原因
 
-- 前端既可以是 Tauri 桌面窗口，也可以是浏览器里的 Web GUI。
-- 后端既可以是 Tauri 壳，也可以是独立 headless web 服务。
-- 命令层代码复用率最大化。
+**底线要求**：cc-switch 的 Web/headless 版本必须能够在无头 Linux 设备上原生编译、原生运行，且不依赖 GTK/WebKitGTK 开发包。
+
+**实验结果**：Tauri 2.11.x 在 Linux 目标下把 `gtk`、`muda`、`tauri-runtime` 中的 GTK/WebKitGTK 绑定写成了**非 optional 依赖**。即使设置 `tauri = { default-features = false, features = ["test"] }` 并关闭 `wry`，`cargo build` 仍会失败，报错需要 `gtk+-3.0`、`atk`、`pango`、`gdk-3.0`、`webkit2gtk-4.1` 等系统库。详细验证记录见 `_dev/verification-results.md`。
+
+**转向**：原方案中"通过 Cargo feature 关闭 `wry` 即可去掉 GTK 依赖"的假设不成立。因此，Web/headless 路径必须**完全不依赖 `tauri` crate**，而不是试图在 Tauri 内部找无头模式。
+
+新的方向是：
+
+- 把业务核心下沉到独立的 `cc-switch-core` crate，零 Tauri 依赖；
+- 桌面版 `cc-switch-tauri` 仅作为薄壳，依赖 core + Tauri；
+- Web/headless 版 `cc-switch-web` 依赖 core + axum，可在无头 Linux 上干净编译运行。
 
 ## 最终目录结构（建议）
 
 ```
 cc-switch/
-├── src/                         # 前端（React）
-│   ├── web/shims/              # 新增：Tauri API 的 Web shim
+├── src/                          # 前端（React + TypeScript）
+│   ├── web/shims/               # 恢复/新建：Tauri API 的 Web shim
 │   └── ...
-├── src-tauri/                   # 原 Tauri 后端
-│   ├── Cargo.toml              # 改为 feature 分层
+├── src-core/                     # 新增：纯 Rust 业务核心（无 Tauri）
+│   ├── Cargo.toml
 │   └── src/
-│       ├── lib.rs              # 增加 pub mod 导出 + feature gate GUI 代码
-│       ├── commands/           # 保持原样，由 generate_handler! 注册
-│       ├── ...                 # 其他模块保持原样
-│       └── bin/                # 删除，迁到 src-web
-├── src-web/                     # 新增：独立无头 web 服务 crate
-│   ├── Cargo.toml              # 依赖 src-tauri（default-features = false）
+│       ├── lib.rs               # 导出 services、commands、Platform trait
+│       ├── platform.rs          # Platform trait 定义
+│       ├── commands_impl/       # 284 个命令的业务实现（普通 Rust 函数）
+│       ├── services/            # 从 src-tauri 下移
+│       ├── database/
+│       ├── store.rs             # AppState
+│       └── error.rs
+├── src-tauri/                    # 改造：Tauri 桌面薄壳
+│   ├── Cargo.toml               # 依赖 cc-switch-core + tauri
+│   └── src/
+│       ├── lib.rs               # run()、setup、GUI 初始化
+│       ├── main.rs
+│       ├── commands.rs          # #[tauri::command] 包装，调用 core 实现
+│       └── platform_tauri.rs    # Tauri 版 Platform 实现
+├── src-web/                      # 新增：独立无头 web 服务 crate
+│   ├── Cargo.toml               # 依赖 cc-switch-core + axum（无 tauri）
 │   ├── src/
-│   │   └── main.rs             # axum + MockRuntime 桥
-│   └── build.rs / build.sh     # 编译脚本（处理镜像、GTK stub 等）
-├── vite.web.config.ts          # 新增：Web 前端构建配置
-├── _dev/                        # 本文档与调研资料
-└── package.json                # 增加 build:web 脚本
+│   │   ├── main.rs              # axum + HeadlessPlatform
+│   │   ├── routes.rs            # HTTP/SSE 路由
+│   │   └── platform_web.rs      # Headless 版 Platform 实现
+│   └── build.rs / build.sh
+├── vite.web.config.ts            # 恢复/新建：Web 前端构建配置
+├── _dev/                         # 本文档与调研资料
+└── package.json                  # 增加 build:web 脚本
 ```
 
-## 后端分层
+## 三层职责
 
-### 1. src-tauri 改造
+### 1. cc-switch-core（业务核心）
 
-**Cargo.toml**
+**设计原则**：
+- 不依赖 `tauri`、`wry`、`gtk`、`webkit2gtk`；
+- 不依赖任何桌面平台 GUI 库；
+- 所有业务逻辑以普通 Rust 函数或 async 函数暴露；
+- 平台上层能力通过 `Platform` trait 抽象。
 
-```toml
-[features]
-default = ["desktop"]
-desktop = ["tauri/wry", "tauri/tray-icon", "tauri/image-png", "dep:tauri-plugin-dialog", ...]
+**关键模块**：
+- `store::AppState`：全局状态，仅包含 `db`、`proxy_service`、`usage_cache`；
+- `services/`：现有服务层整体下移；
+- `commands_impl/`：284 个命令的业务实现；
+- `platform.rs`：`Platform` trait 定义。
 
-[dependencies]
-tauri = { version = "2.8.2", default-features = false, features = ["protocol-asset"] }
-# 插件全部 optional，只在 desktop feature 启用
+**示例**：
+
+```rust
+// src-core/src/commands_impl/proxy.rs
+pub async fn start_proxy_server(
+    state: &AppState,
+    _platform: &dyn Platform,
+) -> Result<ProxyServerInfo, AppError> {
+    state.proxy_service.start().await
+}
 ```
 
-注意：具体保留哪些 tauri 基础 feature 需要实测。MockRuntime 至少需要 `test` feature（或默认开启）。桌面版需要 `wry`、`tray-icon`、`image-png` 等。
+### 2. cc-switch-tauri（桌面薄壳）
 
-**src-tauri/src/lib.rs**
+**职责**：
+- 依赖 `cc-switch-core`；
+- 实现 `TauriPlatform`（`Platform` trait 的 Tauri 版本）；
+- 保留 `#[tauri::command]` 函数，但内部只调用 core 命令实现；
+- 处理 GUI 初始化、托盘、窗口、deep-link、updater 等桌面专属逻辑。
 
-- 将 `mod commands;` 等改为 `pub mod commands;`，让外部 crate 能拿到命令函数路径。
-- 给 `run()` 及 GUI 相关代码加 `#[cfg(feature = "desktop")]`：
-  - tray 创建
-  - 窗口创建
-  - 23 个 Wry 专用命令（可改为 `AppHandle<R: Runtime>` 泛型，或保持 desktop-only）
-  - `on_window_event`、deep-link 插件、updater 插件等
-- 将非 GUI 初始化逻辑尽量抽成独立 `pub fn init_headless(app: &mut App<R>)` 函数，供 `src-web` 调用。
-- 命令清单生成：建议用 `#[macro_export] macro_rules! all_commands { ... }` 共享给 desktop 和 web，避免两份清单。
+**示例**：
 
-### 2. src-web 新建
-
-`src-web/Cargo.toml`：
-
-```toml
-[package]
-name = "cc-switch-web"
-version = "3.17.0"
-edition = "2021"
-
-[dependencies]
-cc-switch = { path = "../src-tauri", default-features = false }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-axum = "0.7"
-tower-http = { version = "0.5", features = ["cors"] }
-serde_json = "1.0"
+```rust
+// src-tauri/src/commands.rs
+#[tauri::command]
+pub async fn start_proxy_server(
+    state: tauri::State<'_, AppState>,
+    platform: tauri::State<'_, TauriPlatform>,
+) -> Result<ProxyServerInfo, String> {
+    cc_switch_core::commands_impl::proxy::start_proxy_server(&state, &*platform)
+        .await
+        .map_err(|e| e.to_string())
+}
 ```
 
-关键：`cc-switch` 关闭 `desktop` 特性 → 不编译 `wry` → 不需要 GTK/WebKitGTK 开发包。
+### 3. cc-switch-web（无头 Web 服务）
 
-**src-web/src/main.rs**：
+**职责**：
+- 依赖 `cc-switch-core`，**不依赖 `tauri`**；
+- 实现 `HeadlessPlatform`（`Platform` trait 的无头版本）；
+- 用 axum 暴露 HTTP/SSE API；
+- 静态服务 `dist-web/`。
 
-1. 用 `tauri::test::mock_builder()` 构建 App。
-2. 调用 `cc_switch_lib::init_headless(&mut app)` 做数据层初始化。
-3. 用 `cc_switch_lib::all_commands!` 生成 `invoke_handler` 注册到 mock App。
-4. `app.run_iteration()` 触发 setup。
-5. 创建 mock webview。
-6. 启动 axum：
-   - `POST /api/invoke` → `get_ipc_response`
-   - `GET /api/events` → SSE 事件桥
-   - `GET /api/version`、`GET /api/info`
-   - `POST /api/exit`
-   - 其余路径静态服务 `dist-web/`
+**关键端点**：
+- `POST /api/invoke`：通用命令调用；
+- `GET /api/events`：SSE 事件推送；
+- `GET /api/version`、`GET /api/info`：元信息；
+- 其余路径静态服务前端产物。
 
-### 3. 命令覆盖率
+## 平台抽象层（Platform trait）
 
-默认情况下 261/284 命令可直接工作。剩余 23 个 Wry 命令可选处理：
+这是连接桌面与无头的"专用中间层"。所有原生命令中直接调用的 Tauri API，都收敛到 `Platform` trait。
 
-- 方案 A（简单）：保持 desktop-only，Web 下返回 "Command not found"，前端有兜底不白屏。
-- 方案 B（推荐）：把签名改成泛型 `AppHandle<R: Runtime>`，Web 下也能注册；无头运行时它们调用窗口/托盘 API 会失败，但能通过 Result 优雅返回错误。
+```rust
+#[async_trait]
+pub trait Platform: Send + Sync {
+    // 窗口/托盘（桌面版实现，headless 版 no-op 或返回 Err）
+    async fn show_window(&self) -> Result<(), String>;
+    async fn hide_window(&self) -> Result<(), String>;
+    async fn set_tray_tooltip(&self, text: &str) -> Result<(), String>;
+
+    // 系统交互
+    async fn open_url(&self, url: &str) -> Result<(), String>;
+    async fn show_message(&self, title: &str, body: &str) -> Result<(), String>;
+    async fn pick_file(&self) -> Result<Option<PathBuf>, String>;
+    async fn copy_to_clipboard(&self, text: &str) -> Result<(), String>;
+
+    // 应用生命周期
+    fn app_version(&self) -> String;
+    fn data_dir(&self) -> PathBuf;
+    async fn restart_app(&self) -> Result<(), String>;
+    async fn exit_app(&self, code: i32);
+
+    // 事件
+    fn emit_event(&self, event: &str, payload: serde_json::Value);
+}
+```
+
+**设计要点**：
+- `Platform` trait 只描述"能力"，不暴露 Tauri 类型；
+- 桌面版通过 `TauriPlatform { app: AppHandle<tauri::Wry> }` 实现；
+- headless 版通过 `HeadlessPlatform` 实现，窗口/托盘类方法返回 `Err("not available in headless mode")` 或 no-op；
+- 命令实现只依赖 `&dyn Platform`，不感知后端形态。
+
+## 命令迁移策略
+
+### 分类处理
+
+| 命令类型 | 数量估算 | 处理方式 |
+|---------|---------|---------|
+| 纯业务命令（只操作 AppState/services） | ~250 | 直接下移到 core，Tauri/web 均调用同一实现 |
+| 平台上层命令（打开链接、剪贴板、对话框等） | ~23 | 业务逻辑下移到 core，内部调用 `Platform` trait |
+| GUI 专用命令（窗口、托盘、主题等） | ~10 | core 中保留 no-op/Err 实现，桌面版实际生效 |
+
+### 迁移顺序
+
+建议先迁移与 GUI 无关的命令（proxy、settings、provider、config 等），再处理涉及 `Platform` 的命令。先验证端到端可行，再批量迁移剩余命令。
 
 ## 前端分层
 
-### 已有 shim（保留）
+### 已有 shim（保留并完善）
 
 `src/web/shims/*.ts` 已覆盖前端用到的全部 Tauri API：
 
@@ -115,15 +180,14 @@ serde_json = "1.0"
 - `path.ts`：homeDir/join → `/api/info` + 字符串拼接
 - `plugin-process.ts`：exit → `/api/exit`
 - `plugin-dialog.ts`：message → alert
-- `plugin-updater.ts`：后续可补 check → `/api/check_update`
+- `plugin-updater.ts`：check → `/api/check_update`
 
 ### 构建配置
 
 `vite.web.config.ts`：
-
-- resolve.alias 把 `@tauri-apps/*` 指向 `src/web/shims/*.ts`
-- 禁用 dev-only 插件（如 code-inspector-plugin）
-- 输出到 `dist-web/`
+- `resolve.alias` 把 `@tauri-apps/*` 指向 `src/web/shims/*.ts`；
+- 禁用 dev-only 插件；
+- 输出到 `dist-web/`。
 
 `package.json` 增加：
 
@@ -140,9 +204,13 @@ serde_json = "1.0"
 pnpm install
 pnpm build:web
 
-# 2. 后端（无 GTK，无代理）
+# 2. 无头后端（无 Tauri，无 GTK）
 cd src-web
 cargo run --bin cc-switch-web
+
+# 3. 桌面后端（验证回归）
+cd src-tauri
+cargo build
 ```
 
 ### 生产构建
@@ -151,35 +219,24 @@ cargo run --bin cc-switch-web
 cd src-web
 cargo build --release --bin cc-switch-web
 # 二进制在 target/release/cc-switch-web
-# 运行时读取 dist-web/ 或编译期嵌入
-```
-
-### 镜像源
-
-如果拉依赖慢或被代理干扰，可在项目内新建 `.cargo/config.toml`：
-
-```toml
-[registries.crates-io]
-protocol = "sparse"
-
-[source.crates-io]
-replace-with = 'rsproxy-sparse'
-
-[source.rsproxy-sparse]
-registry = "sparse+https://rsproxy.cn/index/"
+# 运行时读取 dist-web/ 或编译期嵌入（后续可用 rust-embed）
 ```
 
 ## 风险与待验证
 
-1. **tauri 无 wry 能否编译 MockRuntime**：这是整个方案最大的未知数。需要在最小原型上验证 `tauri = { default-features = false, features = ["test"] }` 在 Linux 上能否 `cargo build` 通过。
-2. **state 初始化完整性**：`init_headless` 必须和原 `run()` 的 setup 非 GUI 部分完全一致，否则命令会 panic。
-3. **异步命令在 spawn_blocking 里的行为**：需确认 `get_ipc_response` 在并发请求下稳定。
-4. **事件顺序**：后端 emit 事件时前端 SSE 必须已连接，否则可能漏早期事件。
+1. **core 与 tauri 的边界划分**：`lib.rs` 中有大量 setup、state manage、插件初始化，需要仔细拆分哪些属于 core，哪些属于 Tauri。
+2. **事件系统**：Tauri 的 `Emitter` 和 headless 的 SSE 事件模型不同，需要统一抽象。
+3. **State 生命周期**：`AppState` 和各类 `*State` 在 core 中如何初始化、在 axum 中如何注入，需要设计清楚。
+4. **异步命令并发**：axum handler 中调用 core async 函数是否需要 `spawn_blocking`，取决于 core 内部是否有阻塞调用。
+5. **桌面版回归**：改造后必须保证 `cargo check --all-targets` 通过，桌面版功能无损。
 
 ## 下一步行动
 
-1. 撤销当前实验性 headless 改动，让仓库恢复干净。
-2. 创建最小验证 crate，测试 `tauri` 在 `default-features = false + test` 下无 GTK 编译是否可行。
-3. 若验证通过，开始改造 `src-tauri/Cargo.toml` 和 `src-tauri/src/lib.rs` 的 feature 分层。
-4. 创建 `src-web` crate，迁移 headless 代码。
-5. 前端 shim 和 vite.web.config.ts 已基本就绪，只需整理进新结构。
+1. **创建最小 POC**：选 5 个命令（如 `start_proxy_server`、`get_settings`、`open_external`、`copy_text_to_clipboard`、`get_version`），验证 core + Platform trait + axum 端到端可行。
+2. **创建 `src-core` crate**：把 `services/`、`database/`、`store.rs`、`error.rs` 等无 Tauri 模块迁移进去。
+3. **定义 `Platform` trait**：列出所有需要抽象的原生 Tauri 能力。
+4. **改造 `src-tauri` 为薄壳**：依赖 core，命令函数只保留 `#[tauri::command]` 包装。
+5. **创建 `src-web` crate**：实现 headless Platform + axum 路由。
+6. **恢复前端 shim 和 `vite.web.config.ts`**。
+7. **批量迁移剩余命令**：按"纯业务 → 平台能力 → GUI 专用"顺序进行。
+8. **回归测试**：桌面版与 Web 版并行验证，直到 284 个命令全部可用。

@@ -1,0 +1,26 @@
+[package]
+name = "cc-switch-web"
+version = "3.17.0"
+description = "Headless Web server for cc-switch"
+authors = ["Jason Young"]
+license = "MIT"
+repository = "https://github.com/farion1231/cc-switch"
+edition = "2021"
+rust-version = "1.85.0"
+
+[[bin]]
+name = "cc-switch-web"
+path = "src/main.rs"
+
+[dependencies]
+cc-switch-core = { path = "../src-core" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+async-trait = "0.1"
+log = "0.4"
+axum = { version = "0.7", features = ["multipart"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+dirs = "5.0"
+arboard = "3.6"
+uuid = { version = "1", features = ["v4"] }

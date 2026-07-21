@@ -181,7 +181,7 @@ pub fn get_claude_settings_path() -> PathBuf {
 
 /// 获取应用配置目录路径 (~/.cc-switch)
 pub fn get_app_config_dir() -> PathBuf {
-    if let Some(custom) = crate::app_store::get_app_config_dir_override() {
+    if let Some(custom) = cc_switch_core::get_app_config_dir_override() {
         return custom;
     }
 

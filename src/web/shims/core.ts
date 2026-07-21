@@ -17,7 +17,6 @@ export async function invoke<T>(cmd: string, args?: InvokeArgs): Promise<T> {
     return handleDialogCommand<T>(cmd, args);
   }
   if (RESTART_COMMANDS.has(cmd)) {
-    // Web 模式下 restart_app 走 /api/restart 端点，触发 axum 优雅关闭 + systemd 重启。
     const res = await fetch('/api/restart', { method: 'POST' });
     const json = await res.json();
     if (!json.success) {
@@ -38,6 +37,22 @@ export async function invoke<T>(cmd: string, args?: InvokeArgs): Promise<T> {
   return json.data as T;
 }
 
+// ----- Tauri API 类型 stub（满足 @tauri-apps/api/core 的导出签名）-----
+// 这些类型在 Web 模式下不会真正使用，但 plugin-updater 等库会 import 它们。
+
+export class Resource {
+  constructor(public rid: number) {}
+  async close(): Promise<void> {}
+}
+
+export class Channel<T = unknown> {
+  constructor() {}
+  onmessage: ((response: T) => void) | undefined;
+  toJSON(): { [key: string]: any } {
+    return { __channel__: this.constructor.name };
+  }
+}
+
 // 文件对话框命令在 Web 模式下用 HTML <input> / <a download> 实现
 async function handleDialogCommand<T>(cmd: string, args?: InvokeArgs): Promise<T> {
   const dialog = await import("./plugin-dialog");
@@ -50,8 +65,6 @@ async function handleDialogCommand<T>(cmd: string, args?: InvokeArgs): Promise<T
         filters: [{ name: "ZIP / Skill", extensions: ["zip", "skill"] }],
       })) as T;
     case "pick_directory": {
-      // 浏览器无法选目录，但可以让用户选一个文件，返回其所在目录的虚拟路径
-      // 实际上 pick_directory 多用于设置 app_config_dir，Web 模式下应该直接让用户输入路径
       const input = document.createElement("input");
       input.type = "text";
       input.placeholder = "输入目录路径（Web 模式下不能选择目录）";

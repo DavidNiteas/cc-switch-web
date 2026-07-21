@@ -47,9 +47,9 @@ pub struct StreamCheckConfig {
 impl Default for StreamCheckConfig {
     fn default() -> Self {
         Self {
-            timeout_secs: 10,
-            degraded_threshold_ms: 2000,
-            max_retries: 2,
+            timeout_secs: 8,
+            degraded_threshold_ms: 6000,
+            max_retries: 1,
         }
     }
 }

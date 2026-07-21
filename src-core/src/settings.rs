@@ -1004,6 +1004,7 @@ pub fn get_effective_current_provider(
     db: &crate::database::Database,
     app_type: &AppType,
 ) -> Result<Option<String>, AppError> {
+    // 优先从内存缓存读取
     let current_id = get_current_provider(app_type);
     if let Some(id) = current_id {
         // 验证该 ID 在数据库中仍然存在；不存在则清理本地缓存。
@@ -1021,6 +1022,14 @@ pub fn get_effective_current_provider(
             }
         }
     }
+
+    // Fallback：内存缓存为空时，查 db 中 is_current = 1 的 provider
+    if let Ok(Some(id)) = db.get_current_provider(app_type.as_str()) {
+        // 同步写入内存缓存
+        let _ = set_current_provider(app_type, Some(&id));
+        return Ok(Some(id));
+    }
+
     Ok(None)
 }
 

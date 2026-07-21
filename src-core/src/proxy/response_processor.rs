@@ -943,7 +943,7 @@ mod tests {
             gemini_shadow: Arc::new(GeminiShadowStore::default()),
             codex_chat_history: Arc::new(CodexChatHistoryStore::default()),
             app_handle: None,
-            auth_state: Arc::new(super::state::ProxyAuthState::new()),
+            auth_state: Arc::new(crate::proxy::state::ProxyAuthState::new()),
             usage_log_callback: None,
             failover_manager: Arc::new(FailoverSwitchManager::new(db)),
         }

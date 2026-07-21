@@ -473,35 +473,230 @@ impl Database {
     ///
     /// 扫描 `proxy_request_logs` 中 `total_cost_usd <= 0` 且有 token 用量的行，
     /// 用 `find_model_pricing_row` 查定价并回填 4 个 cost 列。
-    ///
-    /// **TODO**: 当前为 stub 实现（不更新任何行），仅保证编译通过。
-    /// 真实实现需要 1) 遍历零成本行；2) 查定价；3) 调用 `CostCalculator` 算成本；
-    /// 4) UPDATE 行。原 646 行 core 版本已在上一次迁移中被覆盖丢失，需要从
-    /// `src-tauri/src/services/usage_stats.rs` 的 backfill 调用点反推实现。
     pub fn backfill_missing_usage_costs(&self) -> Result<u64, AppError> {
-        Ok(0)
+        let conn = lock_conn!(self.conn);
+        Self::backfill_missing_usage_costs_on_conn(&conn, None)
     }
 
-    /// `backfill_missing_usage_costs` 的内部实现，直接在已锁定的 conn 上工作。
-    /// `only_request_id` 非空时只回填该行。
+    /// `backfill_missing_usage_costs` 的"按 model 过滤"版本：只回填指定
+    /// `model_id` 或 `pricing_model` 的零成本行。
+    pub fn backfill_missing_usage_costs_for_model(&self, model_id: &str) -> Result<u64, AppError> {
+        let conn = lock_conn!(self.conn);
+        Self::backfill_missing_usage_costs_on_conn(&conn, Some(model_id))
+    }
+
+    /// 内部实现：在已锁定的 conn 上扫描零成本行并回填。
     ///
-    /// **TODO**: stub 实现，仅保证编译通过。
+    /// 对每行：
+    /// 1. 优先用 `pricing_model` 查定价（非空时），否则用 `model`
+    /// 2. 用 `CostCalculator::try_calculate_for_app` 算 4 个 cost
+    /// 3. UPDATE 行的 cost 列
     pub(crate) fn backfill_missing_usage_costs_on_conn(
-        _conn: &Connection,
-        _only_request_id: Option<&str>,
+        conn: &Connection,
+        only_model: Option<&str>,
     ) -> Result<u64, AppError> {
-        Ok(0)
+        use rust_decimal::Decimal;
+        use std::str::FromStr;
+
+        // 选取零成本且有 token 用量的行
+        // 注：only_model 过滤在 Rust 层做（需要归一化匹配，SQL 层难以表达）
+        let sql =
+            "SELECT request_id, app_type, model, request_model, pricing_model, cost_multiplier,
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                    input_token_semantics
+             FROM proxy_request_logs
+             WHERE CAST(total_cost_usd AS REAL) <= 0
+               AND (input_tokens > 0 OR output_tokens > 0
+                    OR cache_read_tokens > 0 OR cache_creation_tokens > 0)";
+
+        // 用统一的闭包读行
+        let row_mapper = |row: &rusqlite::Row| -> rusqlite::Result<(
+            String, String, String, Option<String>, Option<String>, String,
+            i64, i64, i64, i64, i64,
+        )> {
+            Ok((
+                row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
+                row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?,
+                row.get(10)?,
+            ))
+        };
+
+        let mut stmt = conn.prepare(sql).map_err(|e| AppError::Database(e.to_string()))?;
+        let rows = stmt.query_map([], row_mapper);
+
+        let rows = rows.map_err(|e| AppError::Database(e.to_string()))?;
+        let mut updated: u64 = 0;
+        for row in rows {
+            let (
+                request_id,
+                app_type,
+                model,
+                request_model,
+                pricing_model,
+                cost_multiplier_str,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_creation_tokens,
+                input_token_semantics,
+            ) = row.map_err(|e| AppError::Database(e.to_string()))?;
+
+            // 优先用 pricing_model 查定价；空则用 model；model 是 'unknown' 时
+            // fallback 到 request_model
+            let lookup_model = pricing_model
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    if model == "unknown" {
+                        request_model.as_deref().filter(|s| !s.is_empty())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(&model);
+            let pricing = find_model_pricing_row(conn, lookup_model)
+                .ok()
+                .flatten()
+                .and_then(|(input, output, cache_read, cache_creation)| {
+                    crate::proxy::usage::calculator::ModelPricing::from_strings(
+                        &input, &output, &cache_read, &cache_creation,
+                    )
+                    .ok()
+                });
+
+            let Some(pricing) = pricing else {
+                continue;
+            };
+
+            // only_model 过滤：在 Rust 层用归一化匹配
+            // （find_model_pricing_row 内部已做过清洗，这里检查清洗后的 model_id
+            // 是否等于 only_model 参数）
+            if let Some(target_model) = only_model {
+                let normalized_match = lookup_model.eq_ignore_ascii_case(target_model)
+                    || model_pricing_candidates(lookup_model)
+                        .iter()
+                        .any(|c| c.eq_ignore_ascii_case(target_model));
+                if !normalized_match {
+                    continue;
+                }
+            }
+
+            // 根据 input_token_semantics 计算 billable_input_tokens
+            use crate::services::sql_helpers::{
+                INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_LEGACY,
+                INPUT_TOKEN_SEMANTICS_TOTAL,
+            };
+            let input_includes_cache_read = matches!(app_type.as_str(), "codex" | "gemini" | "grokbuild");
+            let billable_input_tokens: i64 = match input_token_semantics {
+                INPUT_TOKEN_SEMANTICS_FRESH => input_tokens,
+                INPUT_TOKEN_SEMANTICS_TOTAL => {
+                    input_tokens - cache_read_tokens - cache_creation_tokens
+                }
+                _ => {
+                    if input_includes_cache_read {
+                        input_tokens - cache_read_tokens
+                    } else {
+                        input_tokens
+                    }
+                }
+            }
+            .max(0);
+
+            let usage = crate::proxy::usage::parser::TokenUsage {
+                input_tokens: billable_input_tokens as u32,
+                output_tokens: output_tokens as u32,
+                cache_read_tokens: cache_read_tokens as u32,
+                cache_creation_tokens: cache_creation_tokens as u32,
+                model: None,
+                message_id: None,
+            };
+
+            let multiplier = Decimal::from_str(&cost_multiplier_str).unwrap_or(Decimal::ONE);
+            let cost = crate::proxy::usage::calculator::CostCalculator::calculate(
+                &usage,
+                &pricing,
+                multiplier,
+            );
+
+            conn.execute(
+                "UPDATE proxy_request_logs
+                 SET input_cost_usd = ?2, output_cost_usd = ?3,
+                     cache_read_cost_usd = ?4, cache_creation_cost_usd = ?5,
+                     total_cost_usd = ?6
+                 WHERE request_id = ?1",
+                params![
+                    request_id,
+                    format!("{:.6}", cost.input_cost),
+                    format!("{:.6}", cost.output_cost),
+                    format!("{:.6}", cost.cache_read_cost),
+                    format!("{:.6}", cost.cache_creation_cost),
+                    format!("{:.6}", cost.total_cost),
+                ],
+            )
+            .map_err(|e| AppError::Database(e.to_string()))?;
+            updated += 1;
+        }
+        Ok(updated)
     }
 
     /// 单行成本回填：读取定价缓存，无则查 `find_model_pricing_row`；
     /// 按 `cost_multiplier` 重算 4 个 cost 字段并赋值到 `log`。
-    ///
-    /// **TODO**: stub 实现，仅保证编译通过。
     pub(crate) fn maybe_backfill_log_costs(
-        _conn: &Connection,
-        _log: &mut RequestLogDetail,
+        conn: &Connection,
+        log: &mut RequestLogDetail,
         _pricing_cache: &mut HashMap<String, Option<(String, String, String, String)>>,
     ) -> Result<(), AppError> {
+        use rust_decimal::Decimal;
+        use std::str::FromStr;
+
+        // 只回填零成本行
+        if log.total_cost_usd.parse::<f64>().unwrap_or(0.0) > 0.0 {
+            return Ok(());
+        }
+
+        let lookup_model = log
+            .pricing_model
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&log.model);
+        let pricing = find_model_pricing_row(conn, lookup_model)
+            .ok()
+            .flatten()
+            .and_then(|(input, output, cache_read, cache_creation)| {
+                crate::proxy::usage::calculator::ModelPricing::from_strings(
+                    &input, &output, &cache_read, &cache_creation,
+                )
+                .ok()
+            });
+
+        if pricing.is_none() {
+            return Ok(());
+        }
+
+        let usage = crate::proxy::usage::parser::TokenUsage {
+            input_tokens: log.input_tokens,
+            output_tokens: log.output_tokens,
+            cache_read_tokens: log.cache_read_tokens,
+            cache_creation_tokens: log.cache_creation_tokens,
+            model: None,
+            message_id: None,
+        };
+
+        let multiplier = Decimal::from_str(&log.cost_multiplier).unwrap_or(Decimal::ONE);
+        let cost = crate::proxy::usage::calculator::CostCalculator::try_calculate_for_app(
+            &log.app_type,
+            &usage,
+            pricing.as_ref(),
+            multiplier,
+        );
+
+        if let Some(cost) = cost {
+            log.input_cost_usd = format!("{:.6}", cost.input_cost);
+            log.output_cost_usd = format!("{:.6}", cost.output_cost);
+            log.cache_read_cost_usd = format!("{:.6}", cost.cache_read_cost);
+            log.cache_creation_cost_usd = format!("{:.6}", cost.cache_creation_cost);
+            log.total_cost_usd = format!("{:.6}", cost.total_cost);
+        }
         Ok(())
     }
 
@@ -1697,6 +1892,9 @@ pub struct ProviderLimitStatus {
 }
 
 /// 查询指定 model_id 的定价行；返回 (input/output/cache_read/cache_creation) 四项单价。
+///
+/// 按"直接匹配 → 命名空间剥离 → 日期后缀剥离 → Bedrock 版本剥离 → 前缀匹配"顺序
+/// 在 `model_pricing` 表中查找；命中即返回。所有匹配均大小写不敏感。
 pub fn find_model_pricing_row(
     conn: &Connection,
     model_id: &str,
@@ -1706,23 +1904,27 @@ pub fn find_model_pricing_row(
         return Ok(Some(row));
     }
 
-    // 2. 生成清洗后的候选列表，依次尝试
-    for candidate in model_pricing_candidates(model_id) {
-        if candidate == model_id {
+    // 2. 生成清洗后的候选列表，依次精确匹配
+    let candidates = model_pricing_candidates(model_id);
+    for candidate in &candidates {
+        if candidate.eq_ignore_ascii_case(model_id) {
             continue;
         }
-        if let Some(row) = query_model_pricing_exact(conn, &candidate)? {
+        if let Some(row) = query_model_pricing_exact(conn, candidate)? {
             return Ok(Some(row));
         }
     }
 
-    // 3. 前缀匹配（Claude Desktop 短路由 ID → 完整 ID）
-    let last_candidate = model_pricing_candidates(model_id)
-        .into_iter()
-        .next_back()
-        .unwrap_or_else(|| model_id.to_string());
-    if let Some(row) = query_model_pricing_prefix(conn, &last_candidate)? {
-        return Ok(Some(row));
+    // 3. 前缀匹配：避免短基础名（如 "gpt-5"）误匹配到变体（如 "gpt-5-mini"）。
+    //    条件：model_id 至少有 3 段（含 2 个 `-`），排除短基础名。
+    //    典型场景：Claude Desktop 短路由 ID `claude-haiku-4-5`（4 段）
+    //    作为 prefix 能匹配到 `claude-haiku-4-5-20251001`。
+    let dash_count = model_id.matches('-').count();
+    if dash_count >= 2 {
+        let prefix_candidate = candidates.last().map(|s| s.as_str()).unwrap_or(model_id);
+        if let Some(row) = query_model_pricing_prefix(conn, prefix_candidate)? {
+            return Ok(Some(row));
+        }
     }
 
     Ok(None)
@@ -1856,6 +2058,14 @@ fn model_pricing_candidates(model_id: &str) -> Vec<String> {
         current = replaced;
     }
 
+    // 3.5. 替换版本号中的 `.` 为 `-`（如 `claude-opus-4.8` → `claude-opus-4-8`）
+    //      生成额外候选；原始点号格式仍会先尝试匹配。
+    if current.contains('.') {
+        let dot_to_dash = current.replace('.', "-");
+        push_unique_candidate(&mut candidates, &dot_to_dash);
+        // 不更新 current，继续用原始格式走后续步骤
+    }
+
     // 4. 剥离 Reasoning Effort 后缀（`-low` / `-high` 等）
     if let Some(stripped) = strip_reasoning_effort_suffix(&current) {
         push_unique_candidate(&mut candidates, &stripped);
@@ -1890,23 +2100,38 @@ fn push_unique_candidate(candidates: &mut Vec<String>, value: &str) {
 }
 
 /// 剥离命名空间前缀：`anthropic/` / `moonshotai/` / `OpenAI/` / `google/` /
-/// `global.anthropic.` 等。
+/// `global.anthropic.` / `openrouter/moonshot/` 等。
+///
+/// 循环剥离所有命名空间段（如 `openrouter/moonshot/kimi-k2-novel:free`
+/// → `kimi-k2-novel:free`），而非只剥离第一段。
 fn strip_known_model_namespace(model_id: &str) -> Option<String> {
-    // 普通斜杠前缀
-    if let Some(idx) = model_id.find('/') {
-        let stripped = model_id[idx + 1..].to_string();
-        if !stripped.is_empty() {
-            return Some(stripped);
+    let mut current = model_id.to_string();
+    let mut changed = false;
+
+    // 循环剥离斜杠前缀：`xxx/yyy/zzz` → `yyy/zzz` → `zzz`
+    while let Some(idx) = current.find('/') {
+        let stripped = current[idx + 1..].to_string();
+        if stripped.is_empty() {
+            break;
         }
+        current = stripped;
+        changed = true;
     }
+
     // Bedrock/Vertex 风格点号前缀
-    if model_id.starts_with("global.anthropic.") {
-        let stripped = model_id["global.anthropic.".len()..].to_string();
+    if current.starts_with("global.anthropic.") {
+        let stripped = current["global.anthropic.".len()..].to_string();
         if !stripped.is_empty() {
-            return Some(stripped);
+            current = stripped;
+            changed = true;
         }
     }
-    None
+
+    if changed {
+        Some(current)
+    } else {
+        None
+    }
 }
 
 /// 剥离 Reasoning Effort 后缀：`-low` / `-high` / `-medium` 等。
@@ -1931,26 +2156,51 @@ fn strip_bedrock_model_version_suffix(model_id: &str) -> Option<String> {
     None
 }
 
-/// 剥离 6 位日期后缀（YYMMDD）：验证月 01-12、日 01-31。
+/// 剥离日期后缀：支持 6 位 YYMMDD、8 位 YYYYMMDD、10 位 YYYY-MM-DD，
+/// 验证月 01-12、日 01-31。
 fn strip_model_date_suffix(model_id: &str) -> Option<String> {
-    let bytes = model_id.as_bytes();
-    if bytes.len() < 7 {
-        return None;
-    }
-    // 找最后一个 `-` 后的 6 位数字
     let last_dash = model_id.rfind('-')?;
     let tail = &model_id[last_dash + 1..];
-    if tail.len() != 6 || !tail.chars().all(|c| c.is_ascii_digit()) {
-        return None;
+
+    // 1. YYYY-MM-DD 格式（tail 是 2 位 DD，需要回溯 MM 和 YYYY）
+    //    必须先检查这个分支，否则会被下面的"全数字"分支拦截掉 2 位 DD。
+    if tail.len() == 2 && tail.chars().all(|c| c.is_ascii_digit()) {
+        let rest = &model_id[..last_dash];
+        let dash2 = rest.rfind('-')?;
+        let mm = &rest[dash2 + 1..];
+        if mm.len() != 2 || !mm.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        let rest2 = &rest[..dash2];
+        let dash3 = rest2.rfind('-')?;
+        let yyyy = &rest2[dash3 + 1..];
+        if yyyy.len() != 4 || !yyyy.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        let mm_v: u32 = mm.parse().ok()?;
+        let dd_v: u32 = tail.parse().ok()?;
+        if mm_v < 1 || mm_v > 12 || dd_v < 1 || dd_v > 31 {
+            return None;
+        }
+        return Some(rest2[..dash3].to_string());
     }
-    // 解析 YYMMDD
-    let (mm_str, dd_str) = (&tail[2..4], &tail[4..6]);
-    let mm: u32 = mm_str.parse().ok()?;
-    let dd: u32 = dd_str.parse().ok()?;
-    if mm < 1 || mm > 12 || dd < 1 || dd > 31 {
-        return None;
+
+    // 2. 连续 6 位 YYMMDD 或 8 位 YYYYMMDD
+    if tail.chars().all(|c| c.is_ascii_digit()) && tail.len() >= 6 {
+        let (mm_str, dd_str) = match tail.len() {
+            6 => (&tail[2..4], &tail[4..6]),
+            8 => (&tail[4..6], &tail[6..8]),
+            _ => return None,
+        };
+        let mm: u32 = mm_str.parse().ok()?;
+        let dd: u32 = dd_str.parse().ok()?;
+        if mm < 1 || mm > 12 || dd < 1 || dd > 31 {
+            return None;
+        }
+        return Some(model_id[..last_dash].to_string());
     }
-    Some(model_id[..last_dash].to_string())
+
+    None
 }
 
 /// 剥离 `claude-` 前缀（当且仅当剩下的是非 Anthropic 模型时）。

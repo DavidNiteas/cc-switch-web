@@ -6,14 +6,33 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
+    // 初始化日志系统
+    // 优先级：RUST_LOG > CC_SWITCH_LOG_LEVEL > 默认 "info"（生产级别）
+    let log_level = std::env::var("RUST_LOG")
+        .or_else(|_| std::env::var("CC_SWITCH_LOG_LEVEL"))
+        .unwrap_or_else(|_| "info".to_string());
+    std::env::set_var("RUST_LOG", &log_level);
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format_timestamp_millis()
+        .init();
+
+    let version = env!("CARGO_PKG_VERSION").to_string();
+
+    let banner = format!(
+        "\n\
+        ╔══════════════════════════════════════════╗\n\
+        ║         CC Switch Web v{version}          ║\n\
+        ║     Headless API Server                  ║\n\
+        ╚══════════════════════════════════════════╝"
+    );
+    log::info!("{}", banner);
+    log::info!("log level: {log_level}");
+
     // 初始化 core：创建配置目录并打开 SQLite 数据库。
     let core_state =
         cc_switch_core::init(None, None).expect("failed to initialize cc-switch-core");
     let app_config_dir = core_state.app_config_dir;
-    let version = env!("CARGO_PKG_VERSION").to_string();
 
-    log::info!("cc-switch-web starting");
-    log::info!("version: {version}");
     log::info!("app_config_dir: {}", app_config_dir.display());
 
     let platform: Arc<dyn cc_switch_core::platform::Platform> =
@@ -58,7 +77,10 @@ async fn main() {
         .await
         .expect("failed to bind");
 
-    log::info!("listening on http://{addr}");
+    log::info!("────────────────────────────────────────");
+    log::info!("  server started on http://{addr}");
+    log::info!("  log level: {log_level} (set CC_SWITCH_LOG_LEVEL=debug for verbose)");
+    log::info!("────────────────────────────────────────");
 
     // 后台启动初始化流程
     let app_state_clone = app_state.clone();

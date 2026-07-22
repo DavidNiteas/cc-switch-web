@@ -48,11 +48,17 @@ async fn main() {
 
     let app = routes::router(platform, app_state.clone(), proxy_auth_state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:18180")
+    let port = std::env::var("CC_SWITCH_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(18180);
+    let addr = format!("127.0.0.1:{port}");
+
+    let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("failed to bind");
 
-    log::info!("listening on http://127.0.0.1:18180");
+    log::info!("listening on http://{addr}");
 
     // 后台启动初始化流程
     let app_state_clone = app_state.clone();

@@ -399,6 +399,52 @@ impl ProxyService {
                 existing_live,
             )?;
         }
+
+        // Sync the provider's auth token to the database so the proxy can
+        // read it via extract_key when forwarding requests upstream.
+        // This is essential after hot-switching to a provider whose API key
+        // was configured in the UI (stored in settings_config.auth) and may
+        // not yet be in the database row that the proxy reads.
+        if let Some(token) = provider
+            .settings_config
+            .get("auth")
+            .and_then(|v| v.get("OPENAI_API_KEY"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty() && *s != PROXY_TOKEN_PLACEHOLDER)
+        {
+            let provider_id = &provider.id;
+            if let Ok(Some(mut db_provider)) =
+                self.db.get_provider_by_id(provider_id, "codex")
+            {
+                if let Some(auth_obj) = db_provider
+                    .settings_config
+                    .get_mut("auth")
+                    .and_then(|v| v.as_object_mut())
+                {
+                    auth_obj.insert("OPENAI_API_KEY".to_string(), json!(token));
+                } else {
+                    if db_provider.settings_config.is_null() {
+                        db_provider.settings_config = json!({});
+                    }
+                    if let Some(root) = db_provider.settings_config.as_object_mut() {
+                        root.insert(
+                            "auth".to_string(),
+                            json!({ "OPENAI_API_KEY": token }),
+                        );
+                    }
+                }
+                if let Err(e) = self
+                    .db
+                    .update_provider_settings_config("codex", provider_id, &db_provider.settings_config)
+                {
+                    log::warn!("同步 Codex Token 到数据库失败: {e}");
+                } else {
+                    log::info!("已同步 Codex Token 到数据库 (provider: {provider_id})");
+                }
+            }
+        }
+
         let (_, proxy_codex_base_url) = self.build_proxy_urls().await?;
 
         Self::apply_codex_takeover_fields_for_provider(

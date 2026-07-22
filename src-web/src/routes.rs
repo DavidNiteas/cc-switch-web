@@ -2043,7 +2043,7 @@ async fn invoke_handler(
         "set_proxy_takeover_for_app" => {
             let app_type = req
                 .args
-                .get("app_type")
+                .get("appType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude")
                 .to_string();
@@ -2096,7 +2096,7 @@ async fn invoke_handler(
         "get_proxy_config_for_app" => {
             let app_type = req
                 .args
-                .get("app_type")
+                .get("appType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude")
                 .to_string();
@@ -2120,7 +2120,7 @@ async fn invoke_handler(
         "get_default_cost_multiplier" => {
             let app_type = req
                 .args
-                .get("app_type")
+                .get("appType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude")
                 .to_string();
@@ -2132,7 +2132,7 @@ async fn invoke_handler(
         "set_default_cost_multiplier" => {
             let app_type = req
                 .args
-                .get("app_type")
+                .get("appType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude")
                 .to_string();
@@ -2150,7 +2150,7 @@ async fn invoke_handler(
         "get_pricing_model_source" => {
             let app_type = req
                 .args
-                .get("app_type")
+                .get("appType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude")
                 .to_string();
@@ -2162,7 +2162,7 @@ async fn invoke_handler(
         "set_pricing_model_source" => {
             let app_type = req
                 .args
-                .get("app_type")
+                .get("appType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude")
                 .to_string();
@@ -2189,13 +2189,13 @@ async fn invoke_handler(
         "switch_proxy_provider" => {
             let app_type = req
                 .args
-                .get("app_type")
+                .get("appType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude")
                 .to_string();
             let provider_id = req
                 .args
-                .get("provider_id")
+                .get("providerId")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
@@ -2207,13 +2207,13 @@ async fn invoke_handler(
         "get_provider_health" => {
             let app_type = req
                 .args
-                .get("app_type")
+                .get("appType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude")
                 .to_string();
             let provider_id = req
                 .args
-                .get("provider_id")
+                .get("providerId")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
@@ -2243,13 +2243,13 @@ async fn invoke_handler(
         "get_circuit_breaker_stats" => {
             let app_type = req
                 .args
-                .get("app_type")
+                .get("appType")
                 .and_then(|v| v.as_str())
                 .unwrap_or("claude")
                 .to_string();
             let provider_id = req
                 .args
-                .get("provider_id")
+                .get("providerId")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();

@@ -10,9 +10,9 @@
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**The headless companion of [CC Switch](README.md)** — runs natively on headless Linux servers, cloud VMs, Docker containers, and any environment without a desktop GUI.
+**The headless companion of [CC Switch](README_original.md)** — runs natively on headless Linux servers, cloud VMs, Docker containers, and any environment without a desktop GUI.
 
-English | [中文](README_WEB_ZH.md) | [日本語](README_WEB_JA.md) | [Original CC Switch README](README.md) | [Changelog](CHANGELOG.md)
+English | [中文](README_WEB_ZH.md) | [日本語](README_WEB_JA.md) | [Original CC Switch README](README_original.md) | [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -20,7 +20,7 @@ English | [中文](README_WEB_ZH.md) | [日本語](README_WEB_JA.md) | [Original
 
 ## Why CC Switch Web?
 
-[CC Switch](README.md) is a desktop app for managing AI coding tools (Claude Code, Codex, Gemini CLI, etc.) with a GUI. But what if you're running on a **headless server** — a cloud VM, a Docker container, a CI runner — where there's no desktop environment, no GTK, no display?
+[CC Switch](README_original.md) is a desktop app for managing AI coding tools (Claude Code, Codex, Gemini CLI, etc.) with a GUI. But what if you're running on a **headless server** — a cloud VM, a Docker container, a CI runner — where there's no desktop environment, no GTK, no display?
 
 **CC Switch Web** is the answer. It provides:
 
@@ -443,6 +443,6 @@ MIT © Jason Young (original CC Switch) · Web adaptation by David Niteas
 
 ## Acknowledgments
 
-- [CC Switch](README.md) by [Jason Young](https://github.com/farion1231) — The original desktop application
+- [CC Switch](README_original.md) by [Jason Young](https://github.com/farion1231) — The original desktop application
 - [Axum](https://github.com/tokio-rs/axum) — The web framework
 - [Tauri](https://tauri.app/) — The desktop framework (still used for the desktop version)

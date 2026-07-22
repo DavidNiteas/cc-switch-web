@@ -10,9 +10,9 @@
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**[CC Switch](README.md) のヘッドレス版** —— デスクトップ GUI のないヘッドレス Linux サーバー、クラウド VM、Docker コンテナなどでネイティブに動作します。
+**[CC Switch](README_original.md) のヘッドレス版** —— デスクトップ GUI のないヘッドレス Linux サーバー、クラウド VM、Docker コンテナなどでネイティブに動作します。
 
-[English](README_WEB.md) | [中文](README_WEB_ZH.md) | 日本語 | [オリジナル CC Switch README](README.md) | [変更履歴](CHANGELOG.md)
+[English](README_WEB.md) | [中文](README_WEB_ZH.md) | 日本語 | [オリジナル CC Switch README](README_original.md) | [変更履歴](CHANGELOG.md)
 
 </div>
 
@@ -20,7 +20,7 @@
 
 ## CC Switch Web が必要な理由
 
-[CC Switch](README.md) は、GUI で AI コーディングツール（Claude Code、Codex、Gemini CLI など）を管理するデスクトップアプリです。しかし、**ヘッドレスサーバー** —— クラウド VM、Docker コンテナ、CI ランナー —— でデスクトップ環境、GTK、ディスプレイがない場合は？
+[CC Switch](README_original.md) は、GUI で AI コーディングツール（Claude Code、Codex、Gemini CLI など）を管理するデスクトップアプリです。しかし、**ヘッドレスサーバー** —— クラウド VM、Docker コンテナ、CI ランナー —— でデスクトップ環境、GTK、ディスプレイがない場合は？
 
 **CC Switch Web** がその答えです：
 
@@ -235,6 +235,6 @@ MIT © Jason Young（オリジナル CC Switch）· Web 適応 by David Niteas
 
 ## 謝辞
 
-- [CC Switch](README.md) by [Jason Young](https://github.com/farion1231) — オリジナルデスクトップアプリ
+- [CC Switch](README_original.md) by [Jason Young](https://github.com/farion1231) — オリジナルデスクトップアプリ
 - [Axum](https://github.com/tokio-rs/axum) — Web フレームワーク
 - [Tauri](https://tauri.app/) — デスクトップフレームワーク

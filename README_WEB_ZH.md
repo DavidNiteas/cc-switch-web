@@ -10,9 +10,9 @@
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**[CC Switch](README.md) 的无头版本** —— 原生运行在无头 Linux 服务器、云虚拟机、Docker 容器以及任何没有桌面 GUI 的环境中。
+**[CC Switch](README_original.md) 的无头版本** —— 原生运行在无头 Linux 服务器、云虚拟机、Docker 容器以及任何没有桌面 GUI 的环境中。
 
-[English](README_WEB.md) | 中文 | [日本語](README_WEB_JA.md) | [原始 CC Switch 文档](README.md) | [更新日志](CHANGELOG.md)
+[English](README_WEB.md) | 中文 | [日本語](README_WEB_JA.md) | [原始 CC Switch 文档](README_original.md) | [更新日志](CHANGELOG.md)
 
 </div>
 
@@ -20,7 +20,7 @@
 
 ## 为什么需要 CC Switch Web？
 
-[CC Switch](README.md) 是一款桌面应用，通过 GUI 管理 AI 编码工具（Claude Code、Codex、Gemini CLI 等）。但如果你在**无头服务器**上运行——云虚拟机、Docker 容器、CI 运行器——没有桌面环境、没有 GTK、没有显示器怎么办？
+[CC Switch](README_original.md) 是一款桌面应用，通过 GUI 管理 AI 编码工具（Claude Code、Codex、Gemini CLI 等）。但如果你在**无头服务器**上运行——云虚拟机、Docker 容器、CI 运行器——没有桌面环境、没有 GTK、没有显示器怎么办？
 
 **CC Switch Web** 就是答案。它提供：
 
@@ -443,6 +443,6 @@ MIT © Jason Young（原始 CC Switch）· Web 适配由 David Niteas 完成
 
 ## 致谢
 
-- [CC Switch](README.md) by [Jason Young](https://github.com/farion1231) —— 原始桌面应用
+- [CC Switch](README_original.md) by [Jason Young](https://github.com/farion1231) —— 原始桌面应用
 - [Axum](https://github.com/tokio-rs/axum) —— Web 框架
 - [Tauri](https://tauri.app/) —— 桌面框架（桌面版仍在使用）

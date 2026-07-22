@@ -3,6 +3,7 @@ use crate::proxy::providers::copilot_auth::CopilotAuthManager;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+#[derive(Clone)]
 pub struct ProxyAuthState {
     pub copilot: Arc<RwLock<CopilotAuthManager>>,
     pub codex_oauth: Arc<RwLock<CodexOAuthManager>>,

@@ -7,6 +7,9 @@ use axum::{
     Extension, Router,
 };
 use cc_switch_core::platform::Platform;
+use cc_switch_core::proxy::providers::codex_oauth_auth::CodexOAuthError;
+use cc_switch_core::proxy::providers::copilot_auth::CopilotAuthError;
+use cc_switch_core::proxy::ProxyAuthState;
 use cc_switch_core::store::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -26,7 +29,78 @@ pub struct InvokeResponse {
     pub error: Option<String>,
 }
 
-pub fn router(platform: Arc<dyn Platform>, app_state: AppState) -> Router {
+#[derive(Debug, Clone, Serialize)]
+struct ManagedAuthAccount {
+    id: String,
+    provider: String,
+    login: String,
+    avatar_url: Option<String>,
+    authenticated_at: i64,
+    is_default: bool,
+    github_domain: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ManagedAuthStatus {
+    provider: String,
+    authenticated: bool,
+    default_account_id: Option<String>,
+    migration_error: Option<String>,
+    accounts: Vec<ManagedAuthAccount>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ManagedAuthDeviceCodeResponse {
+    provider: String,
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: u64,
+}
+
+const AUTH_PROVIDER_GITHUB_COPILOT: &str = "github_copilot";
+const AUTH_PROVIDER_CODEX_OAUTH: &str = "codex_oauth";
+
+fn map_account(
+    provider: &str,
+    account: cc_switch_core::proxy::providers::copilot_auth::GitHubAccount,
+    default_account_id: Option<&str>,
+) -> ManagedAuthAccount {
+    ManagedAuthAccount {
+        is_default: default_account_id == Some(account.id.as_str()),
+        id: account.id,
+        provider: provider.to_string(),
+        login: account.login,
+        avatar_url: account.avatar_url,
+        authenticated_at: account.authenticated_at,
+        github_domain: account.github_domain,
+    }
+}
+
+fn map_device_code_response(
+    provider: &str,
+    response: cc_switch_core::proxy::providers::copilot_auth::GitHubDeviceCodeResponse,
+) -> ManagedAuthDeviceCodeResponse {
+    ManagedAuthDeviceCodeResponse {
+        provider: provider.to_string(),
+        device_code: response.device_code,
+        user_code: response.user_code,
+        verification_uri: response.verification_uri,
+        expires_in: response.expires_in,
+        interval: response.interval,
+    }
+}
+
+fn ensure_auth_provider(auth_provider: &str) -> Result<&'static str, String> {
+    match auth_provider {
+        AUTH_PROVIDER_GITHUB_COPILOT => Ok(AUTH_PROVIDER_GITHUB_COPILOT),
+        AUTH_PROVIDER_CODEX_OAUTH => Ok(AUTH_PROVIDER_CODEX_OAUTH),
+        _ => Err(format!("Unsupported auth provider: {auth_provider}")),
+    }
+}
+
+pub fn router(platform: Arc<dyn Platform>, app_state: AppState, proxy_auth_state: ProxyAuthState) -> Router {
     Router::new()
         .route("/api/invoke", post(invoke_handler))
         .route("/api/version", get(version_handler))
@@ -37,11 +111,13 @@ pub fn router(platform: Arc<dyn Platform>, app_state: AppState) -> Router {
         .fallback_service(tower_http::services::ServeDir::new("dist-web"))
         .layer(Extension(platform))
         .layer(Extension(app_state))
+        .layer(Extension(proxy_auth_state))
 }
 
 async fn invoke_handler(
     Extension(platform): Extension<Arc<dyn Platform>>,
     Extension(app_state): Extension<AppState>,
+    Extension(proxy_auth_state): Extension<ProxyAuthState>,
     Json(req): Json<InvokeRequest>,
 ) -> Response {
     log::info!("invoke: {}", req.cmd);
@@ -781,6 +857,83 @@ async fn invoke_handler(
                 Err(e) => Err(e.to_string()),
             }
         }
+        // ----- Copilot 多账号命令（7 个）-----
+        "copilot_poll_for_auth" => {
+            let device_code = req.args.get("deviceCode").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let github_domain = req.args.get("githubDomain").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let manager = proxy_auth_state.copilot.write().await;
+            match manager.poll_for_token(&device_code, github_domain.as_deref()).await {
+                Ok(Some(_account)) => Ok(Value::Bool(true)),
+                Ok(None) => Ok(Value::Bool(false)),
+                Err(CopilotAuthError::AuthorizationPending) => Ok(Value::Bool(false)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        "copilot_poll_for_account" => {
+            let device_code = req.args.get("deviceCode").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let github_domain = req.args.get("githubDomain").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let manager = proxy_auth_state.copilot.write().await;
+            match manager.poll_for_token(&device_code, github_domain.as_deref()).await {
+                Ok(account) => Ok(serde_json::to_value(account).unwrap_or(Value::Null)),
+                Err(CopilotAuthError::AuthorizationPending) => Ok(Value::Null),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        "copilot_remove_account" => {
+            let account_id = req.args.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let manager = proxy_auth_state.copilot.write().await;
+            match manager.remove_account(&account_id).await {
+                Ok(()) => Ok(Value::Bool(true)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        "copilot_set_default_account" => {
+            let account_id = req.args.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let manager = proxy_auth_state.copilot.write().await;
+            match manager.set_default_account(&account_id).await {
+                Ok(()) => Ok(Value::Bool(true)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        "copilot_get_token_for_account" => {
+            let account_id = req.args.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let manager = proxy_auth_state.copilot.read().await;
+            match manager.get_valid_token_for_account(&account_id).await {
+                Ok(v) => Ok(Value::String(v)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        "copilot_get_models_for_account" => {
+            let account_id = req.args.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let manager = proxy_auth_state.copilot.read().await;
+            match manager.fetch_models_for_account(&account_id).await {
+                Ok(v) => Ok(serde_json::to_value(v).unwrap_or(Value::Null)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        "copilot_get_usage_for_account" => {
+            let account_id = req.args.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let manager = proxy_auth_state.copilot.read().await;
+            match manager.fetch_usage_for_account(&account_id).await {
+                Ok(v) => Ok(serde_json::to_value(v).unwrap_or(Value::Null)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        // ----- Codex OAuth 命令（2 个）-----
+        "get_codex_oauth_quota" => {
+            get_codex_oauth_quota_inner(proxy_auth_state, req).await
+        }
+        "get_codex_oauth_models" => {
+            get_codex_oauth_models_inner(proxy_auth_state, req).await
+        }
+        // ----- 通用 Auth 命令（7 个）-----
+        "auth_start_login" => auth_start_login_inner(proxy_auth_state, req).await,
+        "auth_poll_for_account" => auth_poll_for_account_inner(proxy_auth_state, req).await,
+        "auth_list_accounts" => auth_list_accounts_inner(proxy_auth_state, req).await,
+        "auth_get_status" => auth_get_status_inner(proxy_auth_state, req).await,
+        "auth_remove_account" => auth_remove_account_inner(proxy_auth_state, req).await,
+        "auth_set_default_account" => auth_set_default_account_inner(proxy_auth_state, req).await,
+        "auth_logout" => auth_logout_inner(proxy_auth_state, req).await,
         // ----- C 类：reset_circuit_breaker（事件拆分完成）-----
         "reset_circuit_breaker" => {
             let provider_id = req.args.get("providerId").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -3290,3 +3443,525 @@ pub fn set_shutdown_sender(sender: tokio::sync::mpsc::Sender<()>) {
 // ============================================================================
 // 文件对话框命令兜底（P4-A：由前端 shim 处理，后端只兜底未知情况）
 // ============================================================================
+
+/// 解析 Codex OAuth 模型列表响应
+///
+/// 支持多种 JSON 格式：OpenAI 风格 `{ data: [...] }`、模型列表 `{ models: [...] }`、
+/// 模型映射 `{ models: { "id": {...} } }`、以及纯数组 `[...]`
+fn parse_codex_oauth_models(value: serde_json::Value) -> Vec<serde_json::Value> {
+    let entries = value
+        .get("data")
+        .and_then(|v| v.as_array())
+        .or_else(|| value.get("models").and_then(|v| v.as_array()))
+        .or_else(|| value.get("items").and_then(|v| v.as_array()))
+        .or_else(|| value.as_array());
+
+    let mut models = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+
+    if let Some(entries) = entries {
+        for entry in entries {
+            push_model_entry(&mut models, &mut seen_ids, entry, None);
+        }
+    }
+
+    if let Some(model_map) = value.get("models").and_then(|v| v.as_object()) {
+        for (key, entry) in model_map {
+            push_model_entry(&mut models, &mut seen_ids, entry, Some(key));
+        }
+    }
+
+    models.sort_by(|a, b| {
+        a.get("id").and_then(|v| v.as_str()).unwrap_or("")
+            .cmp(b.get("id").and_then(|v| v.as_str()).unwrap_or(""))
+    });
+    models
+}
+
+fn push_model_entry(
+    models: &mut Vec<serde_json::Value>,
+    seen_ids: &mut std::collections::HashSet<String>,
+    entry: &serde_json::Value,
+    fallback_id: Option<&str>,
+) {
+    if let Some(id) = entry.as_str().map(str::trim).filter(|id| !id.is_empty()) {
+        if seen_ids.insert(id.to_string()) {
+            models.push(serde_json::json!({
+                "id": id,
+                "ownedBy": "Codex",
+            }));
+        }
+        return;
+    }
+
+    let Some(obj) = entry.as_object() else {
+        if let Some(id) = fallback_id.map(str::trim).filter(|id| !id.is_empty()) {
+            if seen_ids.insert(id.to_string()) {
+                models.push(serde_json::json!({
+                    "id": id,
+                    "ownedBy": "Codex",
+                }));
+            }
+        }
+        return;
+    };
+
+    let id = string_field(obj, &["slug", "id", "model", "name"]).or_else(|| {
+        fallback_id.map(str::trim).filter(|id| !id.is_empty()).map(str::to_string)
+    });
+    let Some(id) = id else { return };
+    if !seen_ids.insert(id.clone()) {
+        return;
+    }
+    let owned_by = string_field(obj, &["owned_by", "ownedBy", "provider", "vendor", "category", "owner"])
+        .unwrap_or_else(|| "Codex".to_string());
+
+    models.push(serde_json::json!({
+        "id": id,
+        "ownedBy": owned_by,
+    }));
+}
+
+fn string_field(obj: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .filter_map(|key| obj.get(*key))
+        .filter_map(|v| v.as_str())
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+async fn get_codex_oauth_quota_inner(
+    proxy_auth_state: ProxyAuthState,
+    req: InvokeRequest,
+) -> Result<Value, String> {
+    let account_id = req.args.get("accountId").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let manager = proxy_auth_state.codex_oauth.read().await;
+    let resolved = match account_id {
+        Some(id) if !id.is_empty() => Some(id),
+        _ => manager.default_account_id().await,
+    };
+    let id = match resolved {
+        Some(id) => id,
+        None => {
+            return Ok(serde_json::to_value(
+                cc_switch_core::services::SubscriptionQuota::not_found("codex_oauth")
+            ).unwrap_or(Value::Null));
+        }
+    };
+    let token = match manager.get_valid_token_for_account(&id).await {
+        Ok(t) => t,
+        Err(e) => {
+            return Ok(serde_json::to_value(
+                cc_switch_core::services::SubscriptionQuota::error(
+                    "codex_oauth",
+                    cc_switch_core::services::CredentialStatus::Expired,
+                    format!("Codex OAuth token unavailable: {e}"),
+                )
+            ).unwrap_or(Value::Null));
+        }
+    };
+    match cc_switch_core::services::subscription::query_codex_quota(
+        &token,
+        Some(&id),
+        "codex_oauth",
+        "Codex OAuth access token expired or rejected. Please re-login via cc-switch.",
+    ).await {
+        Ok(v) => Ok(serde_json::to_value(v).unwrap_or(Value::Null)),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+async fn get_codex_oauth_models_inner(
+    proxy_auth_state: ProxyAuthState,
+    req: InvokeRequest,
+) -> Result<Value, String> {
+    let account_id = req.args.get("accountId").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let manager = proxy_auth_state.codex_oauth.read().await;
+    let resolved = match account_id {
+        Some(id) if !id.is_empty() => Some(id),
+        _ => manager.default_account_id().await,
+    };
+    let id = match resolved {
+        Some(id) => id,
+        None => return Err("No ChatGPT account available".to_string()),
+    };
+    let token = match manager.get_valid_token_for_account(&id).await {
+        Ok(t) => t,
+        Err(e) => return Err(format!("Codex OAuth token unavailable: {e}")),
+    };
+    let client = cc_switch_core::proxy::http_client::get();
+    let response = client
+        .get("https://chatgpt.com/backend-api/codex/models")
+        .query(&[("client_version", env!("CARGO_PKG_VERSION"))])
+        .header("Authorization", format!("Bearer {token}"))
+        .header("originator", "cc-switch")
+        .header("chatgpt-account-id", &id)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {e}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        let truncated: String = body.chars().take(512).collect();
+        return Err(format!("HTTP {status}: {truncated}"));
+    }
+    let value: serde_json::Value = response.json().await.map_err(|e| format!("Failed to parse response: {e}"))?;
+    let models = parse_codex_oauth_models(value);
+    Ok(serde_json::to_value(models).unwrap_or(Value::Null))
+}
+
+// ----- 通用 Auth 命令辅助函数 -----
+
+async fn auth_start_login_inner(
+    proxy_auth_state: ProxyAuthState,
+    req: InvokeRequest,
+) -> Result<Value, String> {
+    let auth_provider = req.args.get("authProvider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let auth_provider = ensure_auth_provider(&auth_provider)?;
+    let github_domain = req.args.get("githubDomain").and_then(|v| v.as_str()).map(|s| s.to_string());
+    match auth_provider {
+        AUTH_PROVIDER_GITHUB_COPILOT => {
+            let manager = proxy_auth_state.copilot.read().await;
+            let response = manager.start_device_flow(github_domain.as_deref()).await.map_err(|e| e.to_string())?;
+            Ok(serde_json::to_value(map_device_code_response(auth_provider, response)).unwrap_or(Value::Null))
+        }
+        AUTH_PROVIDER_CODEX_OAUTH => {
+            let manager = proxy_auth_state.codex_oauth.read().await;
+            let response = manager.start_device_flow().await.map_err(|e| e.to_string())?;
+            Ok(serde_json::to_value(map_device_code_response(auth_provider, response)).unwrap_or(Value::Null))
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn auth_poll_for_account_inner(
+    proxy_auth_state: ProxyAuthState,
+    req: InvokeRequest,
+) -> Result<Value, String> {
+    let auth_provider = req.args.get("authProvider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let auth_provider = ensure_auth_provider(&auth_provider)?;
+    let device_code = req.args.get("deviceCode").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let github_domain = req.args.get("githubDomain").and_then(|v| v.as_str()).map(|s| s.to_string());
+    match auth_provider {
+        AUTH_PROVIDER_GITHUB_COPILOT => {
+            let manager = proxy_auth_state.copilot.write().await;
+            match manager.poll_for_token(&device_code, github_domain.as_deref()).await {
+                Ok(account) => {
+                    let default_account_id = manager.get_status().await.default_account_id;
+                    Ok(serde_json::to_value(account.map(|a| map_account(auth_provider, a, default_account_id.as_deref()))).unwrap_or(Value::Null))
+                }
+                Err(CopilotAuthError::AuthorizationPending) => Ok(Value::Null),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        AUTH_PROVIDER_CODEX_OAUTH => {
+            let manager = proxy_auth_state.codex_oauth.write().await;
+            match manager.poll_for_token(&device_code).await {
+                Ok(account) => {
+                    let default_account_id = manager.get_status().await.default_account_id;
+                    Ok(serde_json::to_value(account.map(|a| map_account(auth_provider, a, default_account_id.as_deref()))).unwrap_or(Value::Null))
+                }
+                Err(CodexOAuthError::AuthorizationPending) => Ok(Value::Null),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn auth_list_accounts_inner(
+    proxy_auth_state: ProxyAuthState,
+    req: InvokeRequest,
+) -> Result<Value, String> {
+    let auth_provider = req.args.get("authProvider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let auth_provider = ensure_auth_provider(&auth_provider)?;
+    match auth_provider {
+        AUTH_PROVIDER_GITHUB_COPILOT => {
+            let manager = proxy_auth_state.copilot.read().await;
+            let status = manager.get_status().await;
+            let default_account_id = status.default_account_id.clone();
+            let accounts: Vec<ManagedAuthAccount> = status.accounts.into_iter()
+                .map(|a| map_account(auth_provider, a, default_account_id.as_deref()))
+                .collect();
+            Ok(serde_json::to_value(accounts).unwrap_or(Value::Null))
+        }
+        AUTH_PROVIDER_CODEX_OAUTH => {
+            let manager = proxy_auth_state.codex_oauth.read().await;
+            let status = manager.get_status().await;
+            let default_account_id = status.default_account_id.clone();
+            let accounts: Vec<ManagedAuthAccount> = status.accounts.into_iter()
+                .map(|a| map_account(auth_provider, a, default_account_id.as_deref()))
+                .collect();
+            Ok(serde_json::to_value(accounts).unwrap_or(Value::Null))
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn auth_get_status_inner(
+    proxy_auth_state: ProxyAuthState,
+    req: InvokeRequest,
+) -> Result<Value, String> {
+    let auth_provider = req.args.get("authProvider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let auth_provider = ensure_auth_provider(&auth_provider)?;
+    match auth_provider {
+        AUTH_PROVIDER_GITHUB_COPILOT => {
+            let manager = proxy_auth_state.copilot.read().await;
+            let status = manager.get_status().await;
+            let default_account_id = status.default_account_id.clone();
+            let accounts: Vec<ManagedAuthAccount> = status.accounts.into_iter()
+                .map(|a| map_account(auth_provider, a, default_account_id.as_deref()))
+                .collect();
+            Ok(serde_json::to_value(ManagedAuthStatus {
+                provider: auth_provider.to_string(),
+                authenticated: status.authenticated,
+                default_account_id: default_account_id.clone(),
+                migration_error: status.migration_error,
+                accounts,
+            }).unwrap_or(Value::Null))
+        }
+        AUTH_PROVIDER_CODEX_OAUTH => {
+            let manager = proxy_auth_state.codex_oauth.read().await;
+            let status = manager.get_status().await;
+            let default_account_id = status.default_account_id.clone();
+            let accounts: Vec<ManagedAuthAccount> = status.accounts.into_iter()
+                .map(|a| map_account(auth_provider, a, default_account_id.as_deref()))
+                .collect();
+            Ok(serde_json::to_value(ManagedAuthStatus {
+                provider: auth_provider.to_string(),
+                authenticated: status.authenticated,
+                default_account_id: default_account_id.clone(),
+                migration_error: None,
+                accounts,
+            }).unwrap_or(Value::Null))
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn auth_remove_account_inner(
+    proxy_auth_state: ProxyAuthState,
+    req: InvokeRequest,
+) -> Result<Value, String> {
+    let auth_provider = req.args.get("authProvider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let auth_provider = ensure_auth_provider(&auth_provider)?;
+    let account_id = req.args.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    match auth_provider {
+        AUTH_PROVIDER_GITHUB_COPILOT => {
+            let manager = proxy_auth_state.copilot.write().await;
+            match manager.remove_account(&account_id).await {
+                Ok(()) => Ok(Value::Bool(true)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        AUTH_PROVIDER_CODEX_OAUTH => {
+            let manager = proxy_auth_state.codex_oauth.write().await;
+            match manager.remove_account(&account_id).await {
+                Ok(()) => Ok(Value::Bool(true)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn auth_set_default_account_inner(
+    proxy_auth_state: ProxyAuthState,
+    req: InvokeRequest,
+) -> Result<Value, String> {
+    let auth_provider = req.args.get("authProvider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let auth_provider = ensure_auth_provider(&auth_provider)?;
+    let account_id = req.args.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    match auth_provider {
+        AUTH_PROVIDER_GITHUB_COPILOT => {
+            let manager = proxy_auth_state.copilot.write().await;
+            match manager.set_default_account(&account_id).await {
+                Ok(()) => Ok(Value::Bool(true)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        AUTH_PROVIDER_CODEX_OAUTH => {
+            let manager = proxy_auth_state.codex_oauth.write().await;
+            match manager.set_default_account(&account_id).await {
+                Ok(()) => Ok(Value::Bool(true)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn auth_logout_inner(
+    proxy_auth_state: ProxyAuthState,
+    req: InvokeRequest,
+) -> Result<Value, String> {
+    let auth_provider = req.args.get("authProvider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let auth_provider = ensure_auth_provider(&auth_provider)?;
+    match auth_provider {
+        AUTH_PROVIDER_GITHUB_COPILOT => {
+            let manager = proxy_auth_state.copilot.write().await;
+            match manager.clear_auth().await {
+                Ok(()) => Ok(Value::Bool(true)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        AUTH_PROVIDER_CODEX_OAUTH => {
+            let manager = proxy_auth_state.codex_oauth.write().await;
+            match manager.clear_auth().await {
+                Ok(()) => Ok(Value::Bool(true)),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// 启动初始化流程（后台执行，不阻塞服务启动）
+///
+/// 对应桌面版 `lib.rs::setup()` 中的初始化逻辑。
+pub async fn startup_initialization(app_state: AppState) {
+    let db = app_state.db.clone();
+
+    log::info!("[startup] 开始后台初始化...");
+
+    // 1. 初始化默认 Skills 仓库
+    match db.init_default_skill_repos() {
+        Ok(count) if count > 0 => log::info!("[startup] ✓ Initialized {count} default skill repositories"),
+        Ok(_) => {}
+        Err(e) => log::warn!("[startup] ✗ Failed to init default skill repos: {e}"),
+    }
+
+    // 2. 自动导入 live 配置 + seed 官方预设供应商
+    for app_type in cc_switch_core::app_config::AppType::all().filter(|t| !t.is_additive_mode()) {
+        let should_import = cc_switch_core::services::provider::should_import_default_config_on_startup(
+            &app_state, &app_type,
+        ).unwrap_or(false);
+        if !should_import {
+            log::debug!("[startup] ○ {} already has providers; live import skipped", app_type.as_str());
+            continue;
+        }
+        match cc_switch_core::commands::provider::import_default_config(&app_state, app_type.as_str()) {
+            Ok(true) => log::info!("[startup] ✓ Imported live config for {} as default provider", app_type.as_str()),
+            Ok(false) => log::debug!("[startup] ○ {} already has providers; live import skipped", app_type.as_str()),
+            Err(e) => log::debug!("[startup] ○ No live config to import for {}: {e}", app_type.as_str()),
+        }
+    }
+
+    match db.init_default_official_providers() {
+        Ok(count) if count > 0 => log::info!("[startup] ✓ Seeded {count} official provider(s)"),
+        Ok(_) => {}
+        Err(e) => log::warn!("[startup] ✗ Failed to seed official providers: {e}"),
+    }
+
+    // 3. 自动同步 OpenCode / OpenClaw / Hermes live providers
+    match cc_switch_core::commands::provider::import_opencode_providers_from_live(&app_state) {
+        Ok(count) if count > 0 => log::info!("[startup] ✓ Synced {count} OpenCode provider(s)"),
+        Ok(_) => log::debug!("[startup] ○ No OpenCode provider changes"),
+        Err(e) => log::warn!("[startup] ✗ Failed to import OpenCode providers: {e}"),
+    }
+    match cc_switch_core::commands::openclaw::import_openclaw_providers_from_live(&app_state) {
+        Ok(count) if count > 0 => log::info!("[startup] ✓ Synced {count} OpenClaw provider(s)"),
+        Ok(_) => log::debug!("[startup] ○ No OpenClaw provider changes"),
+        Err(e) => log::warn!("[startup] ✗ Failed to import OpenClaw providers: {e}"),
+    }
+    match cc_switch_core::commands::hermes::import_hermes_providers_from_live(&app_state) {
+        Ok(count) if count > 0 => log::info!("[startup] ✓ Synced {count} Hermes provider(s)"),
+        Ok(_) => log::debug!("[startup] ○ No Hermes provider changes"),
+        Err(e) => log::warn!("[startup] ✗ Failed to import Hermes providers: {e}"),
+    }
+
+    // 4. OMO 配置导入
+    {
+        let has_omo = db.get_all_providers("opencode")
+            .map(|providers| providers.values().any(|p| p.category.as_deref() == Some("omo")))
+            .unwrap_or(false);
+        if !has_omo {
+            match cc_switch_core::services::OmoService::import_from_local(
+                &app_state, &cc_switch_core::services::omo::STANDARD,
+            ) {
+                Ok(provider) => log::info!("[startup] ✓ Imported OMO config as '{}'", provider.name),
+                Err(cc_switch_core::AppError::OmoConfigNotFound) => log::debug!("[startup] ○ No OMO config to import"),
+                Err(e) => log::warn!("[startup] ✗ Failed to import OMO config: {e}"),
+            }
+        }
+    }
+    {
+        let has_omo_slim = db.get_all_providers("opencode")
+            .map(|providers| providers.values().any(|p| p.category.as_deref() == Some("omo-slim")))
+            .unwrap_or(false);
+        if !has_omo_slim {
+            match cc_switch_core::services::OmoService::import_from_local(
+                &app_state, &cc_switch_core::services::omo::SLIM,
+            ) {
+                Ok(provider) => log::info!("[startup] ✓ Imported OMO Slim config as '{}'", provider.name),
+                Err(cc_switch_core::AppError::OmoConfigNotFound) => log::debug!("[startup] ○ No OMO Slim config to import"),
+                Err(e) => log::warn!("[startup] ✗ Failed to import OMO Slim config: {e}"),
+            }
+        }
+    }
+
+    // 5. MCP 服务器导入
+    if db.is_mcp_table_empty().unwrap_or(false) {
+        log::info!("[startup] MCP table empty, importing from live configurations...");
+        match cc_switch_core::services::McpService::import_from_all_apps(&app_state) {
+            Ok(count) if count > 0 => log::info!("[startup] ✓ Imported {count} MCP server(s) total"),
+            Ok(_) => log::debug!("[startup] ○ No MCP servers found"),
+            Err(e) => log::warn!("[startup] ✗ Failed to import MCP servers: {e}"),
+        }
+    }
+
+    // 6. 导入提示词文件
+    if db.is_prompts_table_empty().unwrap_or(false) {
+        log::info!("[startup] Prompts table empty, importing from live configurations...");
+        for app in [
+            cc_switch_core::app_config::AppType::Claude,
+            cc_switch_core::app_config::AppType::Codex,
+            cc_switch_core::app_config::AppType::Gemini,
+            cc_switch_core::app_config::AppType::GrokBuild,
+            cc_switch_core::app_config::AppType::OpenCode,
+            cc_switch_core::app_config::AppType::OpenClaw,
+            cc_switch_core::app_config::AppType::Hermes,
+        ] {
+            match cc_switch_core::services::PromptService::import_from_file_on_first_launch(&app_state, app.clone()) {
+                Ok(count) if count > 0 => log::info!("[startup] ✓ Imported {count} prompt(s) for {}", app.as_str()),
+                Ok(_) => log::debug!("[startup] ○ No prompt file for {}", app.as_str()),
+                Err(e) => log::warn!("[startup] ✗ Failed to import prompt for {}: {e}", app.as_str()),
+            }
+        }
+    }
+
+    // 7. 异常退出恢复
+    let has_backups = db.has_any_live_backup().await.unwrap_or(false);
+    let live_taken_over = app_state.proxy_service.detect_takeover_in_live_configs();
+    if has_backups || live_taken_over {
+        log::warn!("[startup] 检测到可能的接管残留，正在恢复 Live 配置...");
+        if let Err(e) = app_state.proxy_service.recover_from_crash().await {
+            log::error!("[startup] 恢复 Live 配置失败: {e}");
+        } else {
+            log::info!("[startup] Live 配置已恢复");
+        }
+    }
+
+    // 8. 定时备份检查
+    if let Err(e) = db.periodic_backup_if_needed() {
+        log::warn!("[startup] Periodic backup failed: {e}");
+    }
+
+    // 9. 启动定时维护任务（每24小时）
+    let db_for_timer = db.clone();
+    tokio::spawn(async move {
+        const INTERVAL_SECS: u64 = 24 * 60 * 60;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(INTERVAL_SECS));
+        interval.tick().await; // skip immediate first tick
+        loop {
+            interval.tick().await;
+            if let Err(e) = db_for_timer.periodic_backup_if_needed() {
+                log::warn!("[maintenance] Periodic backup failed: {e}");
+            }
+        }
+    });
+
+    log::info!("[startup] 后台初始化完成");
+}

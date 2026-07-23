@@ -1,6 +1,7 @@
 pub mod balance;
 pub mod coding_plan;
 pub mod config;
+pub mod model_fetch;
 pub mod copilot;
 pub mod deeplink;
 pub mod env;

@@ -28,6 +28,9 @@ async fn main() {
     log::info!("{}", banner);
     log::info!("log level: {log_level}");
 
+    // 清理上次遗留的上传临时文件
+    cleanup_old_uploads();
+
     // 初始化 core：创建配置目录并打开 SQLite 数据库。
     let core_state =
         cc_switch_core::init(None, None).expect("failed to initialize cc-switch-core");
@@ -88,14 +91,77 @@ async fn main() {
         routes::startup_initialization(app_state_clone).await;
     });
 
+    let proxy_service = app_state.proxy_service.clone();
+
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
-            // 等待 /api/restart 或 ctrl_c 触发
             tokio::select! {
-                _ = shutdown_rx.recv() => log::info!("[restart] graceful shutdown triggered by /api/restart"),
-                _ = tokio::signal::ctrl_c() => log::info!("[restart] graceful shutdown triggered by SIGINT"),
+                _ = shutdown_rx.recv() => log::info!("[shutdown] triggered by /api/restart"),
+                _ = tokio::signal::ctrl_c() => log::info!("[shutdown] triggered by SIGINT"),
+                _ = wait_for_sigterm() => log::info!("[shutdown] triggered by SIGTERM"),
             }
+            // 停止代理服务器（如果正在运行）
+            log::info!("[shutdown] stopping proxy server...");
+            if let Err(e) = proxy_service.stop().await {
+                log::error!("[shutdown] failed to stop proxy server: {e}");
+            } else {
+                log::info!("[shutdown] proxy server stopped");
+            }
+            log::info!("[shutdown] goodbye");
         })
         .await
         .expect("server failed");
+}
+
+/// 监听 SIGTERM 信号（仅 Unix）。
+#[cfg(unix)]
+async fn wait_for_sigterm() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+    sigterm.recv().await;
+}
+
+/// Unix 之外的平台永远不返回，让 select! 跳过此分支。
+#[cfg(not(unix))]
+async fn wait_for_sigterm() {
+    std::future::pending::<()>().await;
+}
+
+/// 启动时清理 /tmp/cc-switch-web-uploads/ 中超过 24 小时的遗留文件。
+fn cleanup_old_uploads() {
+    let upload_dir = std::env::temp_dir().join("cc-switch-web-uploads");
+    if !upload_dir.exists() {
+        return;
+    }
+    let now = std::time::SystemTime::now();
+    let max_age = std::time::Duration::from_secs(24 * 60 * 60);
+    let mut removed: usize = 0;
+    let mut failed: usize = 0;
+
+    if let Ok(entries) = std::fs::read_dir(&upload_dir) {
+        for entry in entries.flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                if metadata.is_file() {
+                    if let Ok(modified) = metadata.modified() {
+                        if let Ok(age) = now.duration_since(modified) {
+                            if age > max_age {
+                                if std::fs::remove_file(entry.path()).is_ok() {
+                                    removed += 1;
+                                } else {
+                                    failed += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if removed > 0 || failed > 0 {
+        log::info!(
+            "[cleanup] removed {removed} old upload files from {} (failed: {failed})",
+            upload_dir.display()
+        );
+    }
 }

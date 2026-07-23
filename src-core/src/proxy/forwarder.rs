@@ -1867,8 +1867,15 @@ impl RequestForwarder {
                 }
                 if !saw_auth {
                     saw_auth = true;
-                    for (ah_name, ah_value) in &auth_headers {
-                        ordered_headers.append(ah_name.clone(), ah_value.clone());
+                    if auth_headers.is_empty() {
+                        // No stored credentials: pass through the client's original
+                        // auth header. This handles native proxy mode where the
+                        // client (e.g. Codex CLI) sends its own authorization.
+                        ordered_headers.append(key.clone(), value.clone());
+                    } else {
+                        for (ah_name, ah_value) in &auth_headers {
+                            ordered_headers.append(ah_name.clone(), ah_value.clone());
+                        }
                     }
                 }
                 continue;

@@ -2346,108 +2346,20 @@ async fn invoke_handler(
             let models_url = req.args.get("modelsUrl").and_then(|v| v.as_str()).map(|s| s.to_string());
             let custom_user_agent = req.args.get("customUserAgent").and_then(|v| v.as_str()).map(|s| s.to_string());
 
-            if api_key.is_empty() {
-                Err("API Key is required to fetch models".to_string())
-            } else {
-                let candidates = if let Some(ref override_url) = models_url {
-                    let trimmed = override_url.trim();
-                    if !trimmed.is_empty() {
-                        vec![trimmed.to_string()]
-                    } else {
-                        let trimmed = base_url.trim().trim_end_matches('/');
-                        if trimmed.is_empty() {
-                            vec![]
-                        } else if is_full_url {
-                            if let Some(idx) = trimmed.find("/v1/") {
-                                vec![format!("{}/v1/models", &trimmed[..idx])]
-                            } else {
-                                vec![format!("{}/v1/models", trimmed)]
-                            }
-                        } else {
-                            vec![format!("{}/v1/models", trimmed)]
-                        }
-                    }
-                } else {
-                    let trimmed = base_url.trim().trim_end_matches('/');
-                    if trimmed.is_empty() {
-                        vec![]
-                    } else if is_full_url {
-                        if let Some(idx) = trimmed.find("/v1/") {
-                            vec![format!("{}/v1/models", &trimmed[..idx])]
-                        } else {
-                            vec![format!("{}/v1/models", trimmed)]
-                        }
-                    } else {
-                        vec![format!("{}/v1/models", trimmed)]
-                    }
-                };
-
-                if candidates.is_empty() {
-                    Err("Base URL is empty".to_string())
-                } else {
-                    let client = cc_switch_core::proxy::http_client::get();
-                    let mut last_err: Option<String> = None;
-                    let mut result: Option<serde_json::Value> = None;
-
-                    for url in &candidates {
-                        let mut request = client
-                            .get(url)
-                            .header("Authorization", format!("Bearer {}", api_key))
-                            .timeout(std::time::Duration::from_secs(15));
-                        if let Some(ua) = &custom_user_agent {
-                            if let Ok(hv) = reqwest::header::HeaderValue::from_str(ua) {
-                                request = request.header(reqwest::header::USER_AGENT, hv);
-                            }
-                        }
-                        match request.send().await {
-                            Ok(response) => {
-                                let status = response.status();
-                                if status.is_success() {
-                                    match response.json::<serde_json::Value>().await {
-                                        Ok(json) => {
-                                            let models = json.get("data").and_then(|d| d.as_array())
-                                                .map(|arr| {
-                                                    arr.iter().filter_map(|m| {
-                                                        let id = m.get("id").and_then(|v| v.as_str())?;
-                                                        Some(serde_json::json!({
-                                                            "id": id,
-                                                            "ownedBy": m.get("owned_by").and_then(|v| v.as_str())
-                                                        }))
-                                                    }).collect::<Vec<_>>()
-                                                })
-                                                .unwrap_or_default();
-                                            result = Some(serde_json::Value::Array(models));
-                                            break;
-                                        }
-                                        Err(e) => {
-                                            last_err = Some(format!("Failed to parse response: {e}"));
-                                            continue;
-                                        }
-                                    }
-                                } else if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::METHOD_NOT_ALLOWED {
-                                    let body = response.text().await.unwrap_or_default();
-                                    let truncated: String = body.chars().take(512).collect();
-                                    last_err = Some(format!("HTTP {status}: {truncated}"));
-                                    continue;
-                                } else {
-                                    let body = response.text().await.unwrap_or_default();
-                                    let truncated: String = body.chars().take(512).collect();
-                                    last_err = Some(format!("HTTP {status}: {truncated}"));
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                last_err = Some(format!("Request failed: {e}"));
-                                break;
-                            }
-                        }
-                    }
-
-                    match result {
-                        Some(models) => Ok(models),
-                        None => Err(format!("All candidates failed: {}", last_err.unwrap_or_else(|| "no candidates".to_string()))),
-                    }
-                }
+            let user_agent = cc_switch_core::provider::parse_custom_user_agent(custom_user_agent.as_deref())
+                .ok()
+                .flatten();
+            match cc_switch_core::commands::model_fetch::fetch_models(
+                &base_url,
+                &api_key,
+                is_full_url,
+                models_url.as_deref(),
+                user_agent,
+            )
+            .await
+            {
+                Ok(models) => Ok(serde_json::to_value(models).unwrap_or(Value::Null)),
+                Err(e) => Err(e),
             }
         }
         "switch_proxy_provider" => {

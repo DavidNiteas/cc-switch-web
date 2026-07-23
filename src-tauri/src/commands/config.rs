@@ -35,7 +35,8 @@ pub async fn get_config_dir(app: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, String> {
-    let config_dir = cc_switch_core::commands::config::get_config_dir(&app).map_err(|e| e.to_string())?;
+    let config_dir =
+        cc_switch_core::commands::config::get_config_dir(&app).map_err(|e| e.to_string())?;
     let config_dir = std::path::PathBuf::from(config_dir);
 
     if !config_dir.exists() {
@@ -88,8 +89,8 @@ pub async fn get_app_config_path() -> Result<String, String> {
 
 #[tauri::command]
 pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
-    let config_dir = cc_switch_core::commands::config::get_app_config_path()
-        .map_err(|e| e.to_string())?;
+    let config_dir =
+        cc_switch_core::commands::config::get_app_config_path().map_err(|e| e.to_string())?;
     let config_dir = std::path::Path::new(&config_dir)
         .parent()
         .map(|p| p.to_path_buf())

@@ -45,8 +45,12 @@ pub async fn remove_from_failover_queue(
     app_type: String,
     provider_id: String,
 ) -> Result<(), String> {
-    cc_switch_core::commands::failover::remove_from_failover_queue(&state.db, &app_type, &provider_id)
-        .map_err(|e| e.to_string())
+    cc_switch_core::commands::failover::remove_from_failover_queue(
+        &state.db,
+        &app_type,
+        &provider_id,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// 获取指定应用的自动故障转移开关状态（从 proxy_config 表读取）

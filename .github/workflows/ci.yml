@@ -93,7 +93,9 @@ jobs:
 
       - name: Create frontend dist placeholder
         shell: bash
-        run: mkdir -p dist dist-web
+        run: |
+          mkdir -p dist dist-web
+          printf '<!doctype html><html><body>CI placeholder</body></html>\n' > dist-web/index.html
 
       - name: Check Rust formatting
         run: cargo fmt --check

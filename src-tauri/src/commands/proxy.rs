@@ -21,8 +21,8 @@ pub async fn start_proxy_server(
 /// 停止代理服务器（仅停止服务，不恢复/清理 Live 接管状态）
 #[tauri::command]
 pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let takeover = cc_switch_core::commands::proxy::get_proxy_takeover_status(&state.proxy_service)
-        .await?;
+    let takeover =
+        cc_switch_core::commands::proxy::get_proxy_takeover_status(&state.proxy_service).await?;
     if takeover.claude
         || takeover.codex
         || takeover.gemini
@@ -260,10 +260,14 @@ pub async fn reset_circuit_breaker(
     };
 
     if app_enabled && auto_failover_enabled && state.proxy_service.is_running().await {
-        let current_id = db.get_current_provider(&app_type).map_err(|e| e.to_string())?;
+        let current_id = db
+            .get_current_provider(&app_type)
+            .map_err(|e| e.to_string())?;
 
         if let Some(current_id) = current_id {
-            let queue = db.get_failover_queue(&app_type).map_err(|e| e.to_string())?;
+            let queue = db
+                .get_failover_queue(&app_type)
+                .map_err(|e| e.to_string())?;
 
             let restored_order = queue
                 .iter()

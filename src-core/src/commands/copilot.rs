@@ -79,10 +79,7 @@ pub async fn copilot_list_accounts(state: &AppState) -> Result<Vec<GitHubAccount
 }
 
 /// 移除指定账号。
-pub async fn copilot_remove_account(
-    state: &AppState,
-    account_id: &str,
-) -> Result<(), AppError> {
+pub async fn copilot_remove_account(state: &AppState, account_id: &str) -> Result<(), AppError> {
     let manager = copilot_manager(state);
     let manager = manager.write().await;
     manager

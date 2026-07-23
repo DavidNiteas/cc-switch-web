@@ -8,9 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 
-pub use crate::proxy::types::{
-    CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
-};
+pub use crate::proxy::types::{CircuitBreakerConfig, CircuitBreakerStats, CircuitState};
 
 /// 熔断器实例
 pub struct CircuitBreaker {

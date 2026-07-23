@@ -139,6 +139,5 @@ pub fn rename_db_backup(
 
 #[tauri::command]
 pub fn delete_db_backup(filename: String) -> Result<(), String> {
-    cc_switch_core::commands::import_export::delete_db_backup(&filename)
-        .map_err(|e| e.to_string())
+    cc_switch_core::commands::import_export::delete_db_backup(&filename).map_err(|e| e.to_string())
 }

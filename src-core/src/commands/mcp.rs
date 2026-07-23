@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 /// 获取所有 MCP 服务器（统一结构）。
-pub fn get_mcp_servers(state: &AppState) -> Result<IndexMap<String, crate::app_config::McpServer>, AppError> {
+pub fn get_mcp_servers(
+    state: &AppState,
+) -> Result<IndexMap<String, crate::app_config::McpServer>, AppError> {
     McpService::get_all_servers(state)
 }
 
@@ -83,7 +85,8 @@ pub fn validate_mcp_command(cmd: &str) -> Result<bool, AppError> {
 }
 
 /// 读取 mcp.json 中的 servers map。
-pub fn read_mcp_servers_map() -> Result<std::collections::HashMap<String, serde_json::Value>, AppError> {
+pub fn read_mcp_servers_map(
+) -> Result<std::collections::HashMap<String, serde_json::Value>, AppError> {
     crate::claude_mcp::read_mcp_servers_map()
 }
 
@@ -127,11 +130,7 @@ pub fn upsert_mcp_server_in_config(
 ) -> Result<bool, AppError> {
     let app_ty = AppType::from_str(app)?;
 
-    let existing_server = state
-        .db
-        .get_all_mcp_servers()?
-        .get(id)
-        .cloned();
+    let existing_server = state.db.get_all_mcp_servers()?.get(id).cloned();
 
     let mut new_server = if let Some(mut existing) = existing_server {
         existing.server = spec.clone();

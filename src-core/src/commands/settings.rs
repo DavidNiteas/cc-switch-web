@@ -27,10 +27,7 @@ impl CodexHistoryMigrationHook for NoOpCodexHistoryMigrationHook {}
 /// - WebDAV / S3 凭据字段若为空，保留后端已有值（因为 `get_settings_for_frontend`
 ///   会清空密码，空值代表“保持原值”而非“清空”）。
 /// - `local_migrations` 是后端维护的迁移标记，前端无权覆盖，始终保留后端值。
-pub fn merge_settings_for_save(
-    mut incoming: AppSettings,
-    existing: &AppSettings,
-) -> AppSettings {
+pub fn merge_settings_for_save(mut incoming: AppSettings, existing: &AppSettings) -> AppSettings {
     match (&mut incoming.webdav_sync, &existing.webdav_sync) {
         (None, _) => {
             incoming.webdav_sync = existing.webdav_sync.clone();
@@ -75,8 +72,7 @@ pub fn save_settings(
     update_settings(merged)?;
 
     if unify_codex_changed {
-        if let Err(err) =
-            crate::services::provider::reapply_current_codex_official_live(app_state)
+        if let Err(err) = crate::services::provider::reapply_current_codex_official_live(app_state)
         {
             log::warn!("统一 Codex 会话历史开关变更后重写 live 配置失败，回滚设置: {err}");
             if let Err(rollback_err) = update_settings(existing) {
@@ -230,9 +226,8 @@ pub async fn check_app_update_available() -> Result<Option<UpdateInfo>, AppError
         .text()
         .await
         .map_err(|e| AppError::Message(format!("读取更新清单失败: {e}")))?;
-    let manifest: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
-        AppError::Message(format!("解析更新清单失败: {e}"))
-    })?;
+    let manifest: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| AppError::Message(format!("解析更新清单失败: {e}")))?;
 
     let remote_version = manifest
         .get("version")

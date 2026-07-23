@@ -165,8 +165,9 @@ pub fn write_daily_memory_file(filename: &str, content: &str) -> Result<(), AppE
         .map_err(|e| AppError::Message(format!("Failed to create memory directory: {e}")))?;
 
     let path = memory_dir.join(filename);
-    write_text_file(&path, content)
-        .map_err(|e| AppError::Message(format!("Failed to write daily memory file {filename}: {e}")))
+    write_text_file(&path, content).map_err(|e| {
+        AppError::Message(format!("Failed to write daily memory file {filename}: {e}"))
+    })
 }
 
 /// 跨日记文件全文搜索（大小写不敏感），返回匹配结果。
@@ -261,7 +262,9 @@ pub fn delete_daily_memory_file(filename: &str) -> Result<(), AppError> {
     let path = memory_dir().join(filename);
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| {
-            AppError::Message(format!("Failed to delete daily memory file {filename}: {e}"))
+            AppError::Message(format!(
+                "Failed to delete daily memory file {filename}: {e}"
+            ))
         })?;
     }
     Ok(())
@@ -276,9 +279,9 @@ pub fn read_workspace_file(filename: &str) -> Result<Option<String>, AppError> {
         return Ok(None);
     }
 
-    std::fs::read_to_string(&path).map(Some).map_err(|e| {
-        AppError::Message(format!("Failed to read workspace file {filename}: {e}"))
-    })
+    std::fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| AppError::Message(format!("Failed to read workspace file {filename}: {e}")))
 }
 
 /// 原子写入 OpenClaw workspace 文件，自动创建 workspace 目录。

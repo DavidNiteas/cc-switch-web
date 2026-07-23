@@ -13,17 +13,16 @@ pub fn get_global_proxy_url(state: tauri::State<'_, AppState>) -> Result<Option<
 
 /// 设置全局代理 URL
 #[tauri::command]
-pub fn set_global_proxy_url(
-    state: tauri::State<'_, AppState>,
-    url: String,
-) -> Result<(), String> {
+pub fn set_global_proxy_url(state: tauri::State<'_, AppState>, url: String) -> Result<(), String> {
     cc_switch_core::commands::global_proxy::set_global_proxy_url(&state.db, &url)
         .map_err(|e| e.to_string())
 }
 
 /// 测试代理连接
 #[tauri::command]
-pub async fn test_proxy_url(url: String) -> Result<cc_switch_core::commands::global_proxy::ProxyTestResult, String> {
+pub async fn test_proxy_url(
+    url: String,
+) -> Result<cc_switch_core::commands::global_proxy::ProxyTestResult, String> {
     cc_switch_core::commands::global_proxy::test_proxy_url(&url)
         .await
         .map_err(|e| e.to_string())

@@ -19,9 +19,7 @@ pub async fn get_proxy_status(proxy_service: &ProxyService) -> Result<ProxyStatu
 }
 
 /// 启动本地代理服务器。
-pub async fn start_proxy_server(
-    proxy_service: &ProxyService,
-) -> Result<ProxyServerInfo, AppError> {
+pub async fn start_proxy_server(proxy_service: &ProxyService) -> Result<ProxyServerInfo, AppError> {
     proxy_service
         .start()
         .await

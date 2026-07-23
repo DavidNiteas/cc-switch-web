@@ -86,19 +86,20 @@ pub async fn stream_check_all_providers(
 
         let base_url_override =
             resolve_copilot_base_url_override(&provider, &copilot_state).await?;
-        let result = StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
-            .await
-            .unwrap_or_else(|e| StreamCheckResult {
-                status: HealthStatus::Failed,
-                success: false,
-                message: e.to_string(),
-                response_time_ms: None,
-                http_status: None,
-                model_used: String::new(),
-                tested_at: chrono::Utc::now().timestamp(),
-                retry_count: 0,
-                error_category: None,
-            });
+        let result =
+            StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
+                .await
+                .unwrap_or_else(|e| StreamCheckResult {
+                    status: HealthStatus::Failed,
+                    success: false,
+                    message: e.to_string(),
+                    response_time_ms: None,
+                    http_status: None,
+                    model_used: String::new(),
+                    tested_at: chrono::Utc::now().timestamp(),
+                    retry_count: 0,
+                    error_category: None,
+                });
 
         let _ = state
             .db

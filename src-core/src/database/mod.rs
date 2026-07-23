@@ -197,7 +197,9 @@ impl Database {
     }
 
     /// 创建内存数据库（用于测试），并注册可选的变更回调。
-    pub fn memory_with_callback(change_callback: Option<DbChangeCallback>) -> Result<Self, AppError> {
+    pub fn memory_with_callback(
+        change_callback: Option<DbChangeCallback>,
+    ) -> Result<Self, AppError> {
         let conn = Connection::open_in_memory().map_err(|e| AppError::Database(e.to_string()))?;
 
         // 启用外键约束

@@ -3,10 +3,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+type EventListener = Box<dyn Fn(serde_json::Value) + Send + Sync>;
+type EventListeners = Arc<RwLock<HashMap<String, Vec<EventListener>>>>;
+
 pub struct HeadlessPlatform {
     app_config_dir: PathBuf,
     version: String,
-    listeners: Arc<RwLock<HashMap<String, Vec<Box<dyn Fn(serde_json::Value) + Send + Sync>>>>>,
+    listeners: EventListeners,
 }
 
 impl HeadlessPlatform {
@@ -119,7 +122,10 @@ impl Platform for HeadlessPlatform {
 
     fn listen_event(&self, event: &str, handler: Box<dyn Fn(serde_json::Value) + Send + Sync>) {
         if let Ok(mut listeners) = self.listeners.write() {
-            listeners.entry(event.to_string()).or_default().push(handler);
+            listeners
+                .entry(event.to_string())
+                .or_default()
+                .push(handler);
         }
     }
 }

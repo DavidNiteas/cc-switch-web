@@ -414,9 +414,7 @@ impl ProxyService {
             .filter(|s| !s.is_empty() && *s != PROXY_TOKEN_PLACEHOLDER)
         {
             let provider_id = &provider.id;
-            if let Ok(Some(mut db_provider)) =
-                self.db.get_provider_by_id(provider_id, "codex")
-            {
+            if let Ok(Some(mut db_provider)) = self.db.get_provider_by_id(provider_id, "codex") {
                 if let Some(auth_obj) = db_provider
                     .settings_config
                     .get_mut("auth")
@@ -428,16 +426,14 @@ impl ProxyService {
                         db_provider.settings_config = json!({});
                     }
                     if let Some(root) = db_provider.settings_config.as_object_mut() {
-                        root.insert(
-                            "auth".to_string(),
-                            json!({ "OPENAI_API_KEY": token }),
-                        );
+                        root.insert("auth".to_string(), json!({ "OPENAI_API_KEY": token }));
                     }
                 }
-                if let Err(e) = self
-                    .db
-                    .update_provider_settings_config("codex", provider_id, &db_provider.settings_config)
-                {
+                if let Err(e) = self.db.update_provider_settings_config(
+                    "codex",
+                    provider_id,
+                    &db_provider.settings_config,
+                ) {
                     log::warn!("同步 Codex Token 到数据库失败: {e}");
                 } else {
                     log::info!("已同步 Codex Token 到数据库 (provider: {provider_id})");
@@ -572,8 +568,6 @@ impl ProxyService {
         self.get_current_provider_for_app(app_type)?
             .ok_or_else(|| format!("{app_type:?} 当前供应商不存在，无法接管 Live 配置"))
     }
-
-
 
     pub(crate) async fn lock_switch_for_app(
         &self,

@@ -52,7 +52,8 @@ pub async fn test_proxy_url(url: &str) -> Result<ProxyTestResult, AppError> {
     }
 
     let start = Instant::now();
-    let proxy = reqwest::Proxy::all(url).map_err(|e| AppError::Message(format!("Invalid proxy URL: {e}")))?;
+    let proxy = reqwest::Proxy::all(url)
+        .map_err(|e| AppError::Message(format!("Invalid proxy URL: {e}")))?;
     let client = reqwest::Client::builder()
         .proxy(proxy)
         .timeout(std::time::Duration::from_secs(10))

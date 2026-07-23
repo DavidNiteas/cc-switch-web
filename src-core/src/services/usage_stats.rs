@@ -511,17 +511,36 @@ impl Database {
 
         // 用统一的闭包读行
         let row_mapper = |row: &rusqlite::Row| -> rusqlite::Result<(
-            String, String, String, Option<String>, Option<String>, String,
-            i64, i64, i64, i64, i64,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
         )> {
             Ok((
-                row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
-                row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?,
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
                 row.get(10)?,
             ))
         };
 
-        let mut stmt = conn.prepare(sql).map_err(|e| AppError::Database(e.to_string()))?;
+        let mut stmt = conn
+            .prepare(sql)
+            .map_err(|e| AppError::Database(e.to_string()))?;
         let rows = stmt.query_map([], row_mapper);
 
         let rows = rows.map_err(|e| AppError::Database(e.to_string()))?;
@@ -559,7 +578,10 @@ impl Database {
                 .flatten()
                 .and_then(|(input, output, cache_read, cache_creation)| {
                     crate::proxy::usage::calculator::ModelPricing::from_strings(
-                        &input, &output, &cache_read, &cache_creation,
+                        &input,
+                        &output,
+                        &cache_read,
+                        &cache_creation,
                     )
                     .ok()
                 });
@@ -586,7 +608,8 @@ impl Database {
                 INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_LEGACY,
                 INPUT_TOKEN_SEMANTICS_TOTAL,
             };
-            let input_includes_cache_read = matches!(app_type.as_str(), "codex" | "gemini" | "grokbuild");
+            let input_includes_cache_read =
+                matches!(app_type.as_str(), "codex" | "gemini" | "grokbuild");
             let billable_input_tokens: i64 = match input_token_semantics {
                 INPUT_TOKEN_SEMANTICS_FRESH => input_tokens,
                 INPUT_TOKEN_SEMANTICS_TOTAL => {
@@ -613,9 +636,7 @@ impl Database {
 
             let multiplier = Decimal::from_str(&cost_multiplier_str).unwrap_or(Decimal::ONE);
             let cost = crate::proxy::usage::calculator::CostCalculator::calculate(
-                &usage,
-                &pricing,
-                multiplier,
+                &usage, &pricing, multiplier,
             );
 
             conn.execute(
@@ -664,7 +685,10 @@ impl Database {
             .flatten()
             .and_then(|(input, output, cache_read, cache_creation)| {
                 crate::proxy::usage::calculator::ModelPricing::from_strings(
-                    &input, &output, &cache_read, &cache_creation,
+                    &input,
+                    &output,
+                    &cache_read,
+                    &cache_creation,
                 )
                 .ok()
             });
@@ -1997,7 +2021,9 @@ fn query_model_pricing_exact(
     .map(Some)
     .or_else(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => Ok(None),
-        other => Err(AppError::Database(format!("query_model_pricing_exact 失败: {other}"))),
+        other => Err(AppError::Database(format!(
+            "query_model_pricing_exact 失败: {other}"
+        ))),
     })
 }
 
@@ -2023,7 +2049,9 @@ fn query_model_pricing_prefix(
     .map(Some)
     .or_else(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => Ok(None),
-        other => Err(AppError::Database(format!("query_model_pricing_prefix 失败: {other}"))),
+        other => Err(AppError::Database(format!(
+            "query_model_pricing_prefix 失败: {other}"
+        ))),
     })
 }
 
@@ -2213,9 +2241,19 @@ fn strip_claude_desktop_non_anthropic_prefix(model_id: &str) -> Option<String> {
     }
     let tail = &model_id["claude-".len()..];
     // 检查 tail 是否包含非 Anthropic 标记
-    const NON_ANTHROPIC_MARKERS: &[&str] =
-        &["gpt-", "gemini-", "kimi-", "deepseek-", "doubao-", "qwen-", "mistral-"];
-    if NON_ANTHROPIC_MARKERS.iter().any(|m| tail.to_ascii_lowercase().starts_with(m)) {
+    const NON_ANTHROPIC_MARKERS: &[&str] = &[
+        "gpt-",
+        "gemini-",
+        "kimi-",
+        "deepseek-",
+        "doubao-",
+        "qwen-",
+        "mistral-",
+    ];
+    if NON_ANTHROPIC_MARKERS
+        .iter()
+        .any(|m| tail.to_ascii_lowercase().starts_with(m))
+    {
         return Some(tail.to_string());
     }
     None

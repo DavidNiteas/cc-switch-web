@@ -18,7 +18,6 @@ pub mod commands;
 pub mod config;
 pub mod database;
 pub mod deeplink;
-pub mod model_capabilities;
 pub mod error;
 pub mod gemini_config;
 pub mod gemini_mcp;
@@ -26,6 +25,7 @@ pub mod grok_config;
 pub mod hermes_config;
 pub mod init_status;
 pub mod mcp;
+pub mod model_capabilities;
 pub mod openclaw_config;
 pub mod opencode_config;
 pub mod platform;
@@ -35,27 +35,27 @@ pub mod provider;
 pub mod provider_defaults;
 pub mod proxy;
 pub mod services;
-pub mod settings;
 pub mod session_manager;
+pub mod settings;
 pub mod store;
-pub mod usage_script;
 pub mod usage_events;
+pub mod usage_script;
 
+pub use app_config::AppType;
 pub use app_store::{get_app_config_dir_override, set_app_config_dir_override};
-pub use store::AppState;
 pub use config::get_app_config_dir;
 pub use database::Database;
 pub use error::AppError;
-pub use app_config::AppType;
 pub use platform::{FileDialogOptions, FileFilter, MessageDialogKind, Platform};
 pub use provider::{
-    AuthBinding, AuthBindingSource, ClaudeDesktopMode, ClaudeDesktopModelRoute,
-    ClaudeModelConfig, CodexChatReasoningConfig, CodexModelConfig, GeminiModelConfig,
-    LocalProxyRequestOverrides, OpenCodeModel, OpenCodeModelLimit, OpenCodeProviderConfig,
-    OpenCodeProviderOptions, Provider, ProviderManager, ProviderMeta, UniversalProvider,
-    UniversalProviderApps, UniversalProviderModels, UsageData, UsageResult, UsageScript,
+    AuthBinding, AuthBindingSource, ClaudeDesktopMode, ClaudeDesktopModelRoute, ClaudeModelConfig,
+    CodexChatReasoningConfig, CodexModelConfig, GeminiModelConfig, LocalProxyRequestOverrides,
+    OpenCodeModel, OpenCodeModelLimit, OpenCodeProviderConfig, OpenCodeProviderOptions, Provider,
+    ProviderManager, ProviderMeta, UniversalProvider, UniversalProviderApps,
+    UniversalProviderModels, UsageData, UsageResult, UsageScript,
 };
 pub use provider_defaults::{infer_provider_icon, ProviderIcon, DEFAULT_PROVIDER_ICONS};
+pub use store::AppState;
 
 /// 数据库变更通知回调。
 ///
@@ -85,8 +85,7 @@ pub fn init(
     }
 
     let app_config_dir = config::get_app_config_dir();
-    std::fs::create_dir_all(&app_config_dir)
-        .map_err(|e| AppError::io(&app_config_dir, e))?;
+    std::fs::create_dir_all(&app_config_dir).map_err(|e| AppError::io(&app_config_dir, e))?;
 
     let db = Arc::new(Database::init_with_callback(db_change_callback)?);
 

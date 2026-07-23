@@ -101,5 +101,8 @@ pub async fn open_hermes_web_ui(path: Option<&str>) -> Result<HermesWebUiResult,
         _ => format!("{base}/"),
     };
 
-    Ok(HermesWebUiResult { url: target, online })
+    Ok(HermesWebUiResult {
+        url: target,
+        online,
+    })
 }

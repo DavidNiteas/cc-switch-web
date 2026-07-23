@@ -254,12 +254,12 @@ pub async fn set_auto_launch(enabled: bool) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
-    use cc_switch_core::commands::settings::merge_settings_for_save;
     use crate::settings::{
         AppSettings, CodexOfficialHistoryUnifyMigration, CodexProviderTemplateMigration,
         CodexThirdPartyHistoryProviderBucketMigration, LocalMigrations, S3SyncSettings,
         WebDavSyncSettings,
     };
+    use cc_switch_core::commands::settings::merge_settings_for_save;
 
     #[test]
     fn save_settings_should_preserve_existing_webdav_when_payload_omits_it() {

@@ -84,7 +84,12 @@ pub fn add_custom_endpoint(
     url: &str,
 ) -> Result<(), AppError> {
     let app_type = AppType::from_str(app)?;
-    crate::services::ProviderService::add_custom_endpoint(state, app_type, provider_id, url.to_string())
+    crate::services::ProviderService::add_custom_endpoint(
+        state,
+        app_type,
+        provider_id,
+        url.to_string(),
+    )
 }
 
 /// 移除自定义端点。
@@ -95,7 +100,12 @@ pub fn remove_custom_endpoint(
     url: &str,
 ) -> Result<(), AppError> {
     let app_type = AppType::from_str(app)?;
-    crate::services::ProviderService::remove_custom_endpoint(state, app_type, provider_id, url.to_string())
+    crate::services::ProviderService::remove_custom_endpoint(
+        state,
+        app_type,
+        provider_id,
+        url.to_string(),
+    )
 }
 
 /// 更新端点最后使用时间。
@@ -106,7 +116,12 @@ pub fn update_endpoint_last_used(
     url: &str,
 ) -> Result<(), AppError> {
     let app_type = AppType::from_str(app)?;
-    crate::services::ProviderService::update_endpoint_last_used(state, app_type, provider_id, url.to_string())
+    crate::services::ProviderService::update_endpoint_last_used(
+        state,
+        app_type,
+        provider_id,
+        url.to_string(),
+    )
 }
 
 /// 更新供应商排序。
@@ -120,19 +135,20 @@ pub fn update_providers_sort_order(
 }
 
 /// 导入默认配置。
-pub fn import_default_config(
-    state: &crate::store::AppState,
-    app: &str,
-) -> Result<bool, AppError> {
+pub fn import_default_config(state: &crate::store::AppState, app: &str) -> Result<bool, AppError> {
     let app_type = AppType::from_str(app)?;
-    let imported = crate::services::ProviderService::import_default_config(state, app_type.clone())?;
+    let imported =
+        crate::services::ProviderService::import_default_config(state, app_type.clone())?;
 
     if imported {
         if state
             .db
             .should_auto_extract_config_snippet(app_type.as_str())?
         {
-            match crate::services::ProviderService::extract_common_config_snippet(state, app_type.clone()) {
+            match crate::services::ProviderService::extract_common_config_snippet(
+                state,
+                app_type.clone(),
+            ) {
                 Ok(snippet) if !snippet.is_empty() && snippet != "{}" => {
                     let _ = state
                         .db
@@ -145,7 +161,9 @@ pub fn import_default_config(
             }
         }
 
-        crate::services::ProviderService::migrate_legacy_common_config_usage_if_needed(state, app_type)?;
+        crate::services::ProviderService::migrate_legacy_common_config_usage_if_needed(
+            state, app_type,
+        )?;
     }
 
     Ok(imported)
@@ -183,10 +201,7 @@ pub fn delete_universal_provider(
 }
 
 /// 同步通用供应商到各应用。
-pub fn sync_universal_provider(
-    state: &crate::store::AppState,
-    id: &str,
-) -> Result<bool, AppError> {
+pub fn sync_universal_provider(state: &crate::store::AppState, id: &str) -> Result<bool, AppError> {
     crate::services::ProviderService::sync_universal_to_apps(state, id)
 }
 
@@ -199,8 +214,7 @@ pub fn import_opencode_providers_from_live(
 
 /// 获取 OpenCode live 中的供应商 id 列表。
 pub fn get_opencode_live_provider_ids() -> Result<Vec<String>, AppError> {
-    crate::opencode_config::get_providers()
-        .map(|providers| providers.keys().cloned().collect())
+    crate::opencode_config::get_providers().map(|providers| providers.keys().cloned().collect())
 }
 
 /// 新增供应商（add 路径，区别于 save_provider 的 upsert 语义）。
@@ -271,9 +285,7 @@ pub async fn test_usage_script(
 }
 
 /// 确保 Claude Desktop 官方供应商 seed 存在。
-pub fn ensure_claude_desktop_official_provider(
-    db: &Arc<Database>,
-) -> Result<bool, AppError> {
+pub fn ensure_claude_desktop_official_provider(db: &Arc<Database>) -> Result<bool, AppError> {
     db.ensure_official_seed_by_id(
         crate::database::CLAUDE_DESKTOP_OFFICIAL_PROVIDER_ID,
         AppType::ClaudeDesktop,
@@ -286,8 +298,8 @@ pub fn ensure_codex_official_provider(db: &Arc<Database>) -> Result<bool, AppErr
 }
 
 /// 获取 Claude Desktop 默认代理路由表。
-pub fn get_claude_desktop_default_routes()
--> Vec<crate::claude_desktop_config::ClaudeDesktopDefaultRoute> {
+pub fn get_claude_desktop_default_routes(
+) -> Vec<crate::claude_desktop_config::ClaudeDesktopDefaultRoute> {
     crate::claude_desktop_config::default_proxy_routes()
 }
 
@@ -306,12 +318,8 @@ pub fn import_claude_desktop_providers_from_claude(
     use crate::provider::ClaudeDesktopMode;
     use std::collections::HashSet;
 
-    let claude_providers = state
-        .db
-        .get_all_providers(AppType::Claude.as_str())?;
-    let existing_ids = state
-        .db
-        .get_provider_ids(AppType::ClaudeDesktop.as_str())?;
+    let claude_providers = state.db.get_all_providers(AppType::Claude.as_str())?;
+    let existing_ids = state.db.get_provider_ids(AppType::ClaudeDesktop.as_str())?;
     let existing_set: HashSet<_> = existing_ids.iter().cloned().collect();
 
     let mut imported = 0usize;
@@ -386,8 +394,12 @@ fn resolve_coding_plan_credentials(
         .unwrap_or(false);
     if is_zenmux {
         return (
-            usage_script.and_then(|s| s.base_url.clone()).unwrap_or_default(),
-            usage_script.and_then(|s| s.api_key.clone()).unwrap_or_default(),
+            usage_script
+                .and_then(|s| s.base_url.clone())
+                .unwrap_or_default(),
+            usage_script
+                .and_then(|s| s.api_key.clone())
+                .unwrap_or_default(),
         );
     }
     let native = resolve_native_credentials(app_type, provider);

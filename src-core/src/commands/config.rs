@@ -5,7 +5,11 @@ use crate::error::AppError;
 use std::str::FromStr;
 
 /// 获取指定应用的配置状态。
-pub fn get_config_status(db: &Database, app: &str, proxy_running: bool) -> Result<ConfigStatus, AppError> {
+pub fn get_config_status(
+    db: &Database,
+    app: &str,
+    proxy_running: bool,
+) -> Result<ConfigStatus, AppError> {
     let app_type = AppType::from_str(app)?;
     match app_type {
         AppType::Claude => Ok(crate::config::get_claude_config_status()),
@@ -71,9 +75,7 @@ pub fn get_config_dir(app: &str) -> Result<String, AppError> {
     let app_type = AppType::from_str(app)?;
     let dir = match app_type {
         AppType::Claude => config::get_claude_config_dir(),
-        AppType::ClaudeDesktop => {
-            crate::claude_desktop_config::get_config_library_path()?
-        }
+        AppType::ClaudeDesktop => crate::claude_desktop_config::get_config_library_path()?,
         AppType::Codex => crate::codex_config::get_codex_config_dir(),
         AppType::Gemini => crate::gemini_config::get_gemini_dir(),
         AppType::GrokBuild => crate::grok_config::get_grok_config_dir(),
@@ -86,7 +88,9 @@ pub fn get_config_dir(app: &str) -> Result<String, AppError> {
 
 /// 获取 Claude Code 配置文件路径。
 pub fn get_claude_code_config_path() -> Result<String, AppError> {
-    Ok(config::get_claude_settings_path().to_string_lossy().to_string())
+    Ok(config::get_claude_settings_path()
+        .to_string_lossy()
+        .to_string())
 }
 
 /// 获取 cc-switch 应用配置目录路径。
@@ -101,7 +105,11 @@ pub fn get_config_snippet(db: &Database, app: &str) -> Result<Option<String>, Ap
 }
 
 /// 设置 common config snippet。
-pub fn set_config_snippet(db: &Database, app: &str, snippet: Option<String>) -> Result<(), AppError> {
+pub fn set_config_snippet(
+    db: &Database,
+    app: &str,
+    snippet: Option<String>,
+) -> Result<(), AppError> {
     let app_type = AppType::from_str(app)?;
     db.set_config_snippet(app_type.as_str(), snippet)
 }
@@ -168,10 +176,7 @@ pub fn get_claude_common_config_snippet(db: &Database) -> Result<Option<String>,
 }
 
 /// 设置 Claude 通用配置片段。
-pub fn set_claude_common_config_snippet(
-    db: &Database,
-    snippet: &str,
-) -> Result<(), AppError> {
+pub fn set_claude_common_config_snippet(db: &Database, snippet: &str) -> Result<(), AppError> {
     let is_cleared = snippet.trim().is_empty();
 
     if !is_cleared {
@@ -179,7 +184,11 @@ pub fn set_claude_common_config_snippet(
             .map_err(|e| AppError::Message(invalid_json_format_error(e)))?;
     }
 
-    let value = if is_cleared { None } else { Some(snippet.to_string()) };
+    let value = if is_cleared {
+        None
+    } else {
+        Some(snippet.to_string())
+    };
 
     db.set_config_snippet("claude", value)?;
     db.set_config_snippet_cleared("claude", is_cleared)?;
@@ -201,11 +210,7 @@ pub fn update_toml_common_config_snippet(
     snippet_toml: &str,
     enabled: bool,
 ) -> Result<String, AppError> {
-    crate::services::provider::update_toml_common_config_snippet(
-        config_toml,
-        snippet_toml,
-        enabled,
-    )
+    crate::services::provider::update_toml_common_config_snippet(config_toml, snippet_toml, enabled)
 }
 
 // ============================================================================
@@ -265,7 +270,9 @@ pub fn open_config_folder(app: &str) -> Result<FolderInfo, AppError> {
 /// 返回 OpenClaw workspace 目录路径（D 类降级：原 `open_workspace_directory`）。
 pub fn open_workspace_directory(subdir: &str) -> Result<FolderInfo, AppError> {
     let dir = match subdir {
-        "memory" => crate::openclaw_config::get_openclaw_dir().join("workspace").join("memory"),
+        "memory" => crate::openclaw_config::get_openclaw_dir()
+            .join("workspace")
+            .join("memory"),
         _ => crate::openclaw_config::get_openclaw_dir().join("workspace"),
     };
     let exists = dir.exists();
@@ -292,10 +299,13 @@ pub fn set_common_config_snippet(
     let is_cleared = snippet.trim().is_empty();
     let old_snippet = state.db.get_config_snippet(app_type)?;
 
-    validate_common_config_snippet(app_type, snippet)
-        .map_err(AppError::Message)?;
+    validate_common_config_snippet(app_type, snippet).map_err(AppError::Message)?;
 
-    let value = if is_cleared { None } else { Some(snippet.to_string()) };
+    let value = if is_cleared {
+        None
+    } else {
+        Some(snippet.to_string())
+    };
 
     if matches!(app_type, "claude" | "codex" | "gemini") {
         if let Some(legacy_snippet) = old_snippet
@@ -303,11 +313,7 @@ pub fn set_common_config_snippet(
             .filter(|value| !value.trim().is_empty())
         {
             let app = AppType::from_str(app_type)?;
-            ProviderService::migrate_legacy_common_config_usage(
-                state,
-                app,
-                legacy_snippet,
-            )?;
+            ProviderService::migrate_legacy_common_config_usage(state, app, legacy_snippet)?;
         }
     }
 
@@ -349,13 +355,9 @@ pub fn extract_common_config_snippet(
     let app = AppType::from_str(app_type)?;
 
     if let Some(settings_config) = settings_config.filter(|s| !s.trim().is_empty()) {
-        let settings: serde_json::Value =
-            serde_json::from_str(settings_config)
-                .map_err(|e| AppError::Message(invalid_json_format_error(e)))?;
-        return ProviderService::extract_common_config_snippet_from_settings(
-            app,
-            &settings,
-        );
+        let settings: serde_json::Value = serde_json::from_str(settings_config)
+            .map_err(|e| AppError::Message(invalid_json_format_error(e)))?;
+        return ProviderService::extract_common_config_snippet_from_settings(app, &settings);
     }
 
     ProviderService::extract_common_config_snippet(state, app)

@@ -1647,9 +1647,7 @@ impl RequestForwarder {
                     }
                     Err(e) => {
                         log::error!("[CodexOAuth] 获取 access_token 失败: {e}");
-                        return Err(ProxyError::AuthError(format!(
-                            "Codex OAuth 认证失败: {e}"
-                        )));
+                        return Err(ProxyError::AuthError(format!("Codex OAuth 认证失败: {e}")));
                     }
                 }
             }

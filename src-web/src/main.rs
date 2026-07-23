@@ -1,5 +1,6 @@
 mod platform_web;
 mod routes;
+mod web_assets;
 
 use crate::platform_web::HeadlessPlatform;
 use std::sync::Arc;
@@ -32,8 +33,7 @@ async fn main() {
     cleanup_old_uploads();
 
     // 初始化 core：创建配置目录并打开 SQLite 数据库。
-    let core_state =
-        cc_switch_core::init(None, None).expect("failed to initialize cc-switch-core");
+    let core_state = cc_switch_core::init(None, None).expect("failed to initialize cc-switch-core");
     let app_config_dir = core_state.app_config_dir;
 
     log::info!("app_config_dir: {}", app_config_dir.display());

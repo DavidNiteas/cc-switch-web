@@ -4,7 +4,10 @@ use crate::provider::Provider;
 use std::str::FromStr;
 
 /// 获取故障转移队列。
-pub fn get_failover_queue(db: &Database, app_type: &str) -> Result<Vec<FailoverQueueItem>, AppError> {
+pub fn get_failover_queue(
+    db: &Database,
+    app_type: &str,
+) -> Result<Vec<FailoverQueueItem>, AppError> {
     db.get_failover_queue(app_type)
 }
 
@@ -61,10 +64,7 @@ pub async fn set_auto_failover_enabled(
         "[Failover] Setting auto_failover_enabled: app_type='{app_type}', enabled={enabled}"
     );
 
-    let mut config = app_state
-        .db
-        .get_proxy_config_for_app(app_type)
-        .await?;
+    let mut config = app_state.db.get_proxy_config_for_app(app_type).await?;
 
     if enabled && !config.enabled {
         return Err(AppError::Message(
@@ -89,9 +89,7 @@ pub async fn set_auto_failover_enabled(
                 ));
             };
 
-            app_state
-                .db
-                .add_to_failover_queue(app_type, &current_id)?;
+            app_state.db.add_to_failover_queue(app_type, &current_id)?;
             auto_added_provider_id = Some(current_id);
 
             queue = app_state.db.get_failover_queue(app_type)?;
@@ -121,10 +119,7 @@ pub async fn set_auto_failover_enabled(
     }
 
     config.auto_failover_enabled = enabled;
-    app_state
-        .db
-        .update_proxy_config_for_app(config)
-        .await?;
+    app_state.db.update_proxy_config_for_app(config).await?;
 
     Ok(SetAutoFailoverResult {
         enabled,

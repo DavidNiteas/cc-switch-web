@@ -27,10 +27,7 @@ pub async fn read_claude_mcp_config() -> Result<Option<String>, String> {
 
 /// 新增或更新一个 MCP 服务器条目
 #[tauri::command]
-pub async fn upsert_claude_mcp_server(
-    id: String,
-    spec: Value,
-) -> Result<bool, String> {
+pub async fn upsert_claude_mcp_server(id: String, spec: Value) -> Result<bool, String> {
     cc_switch_core::commands::mcp::upsert_claude_mcp_server(&id, spec).map_err(|e| e.to_string())
 }
 
@@ -59,8 +56,8 @@ pub async fn get_mcp_config(
     state: State<'_, AppState>,
     app: String,
 ) -> Result<McpConfigResponse, String> {
-    let res = cc_switch_core::commands::mcp::get_mcp_config(&state, &app)
-        .map_err(|e| e.to_string())?;
+    let res =
+        cc_switch_core::commands::mcp::get_mcp_config(&state, &app).map_err(|e| e.to_string())?;
     Ok(McpConfigResponse {
         config_path: res.config_path,
         servers: res.servers,

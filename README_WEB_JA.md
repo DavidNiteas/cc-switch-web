@@ -26,7 +26,7 @@
 
 - **ゼロ GUI 依存** —— GTK、WebKitGTK、X11 不要。純粋な Rust + Axum HTTP サーバー。任意の Linux サーバーで動作。
 - **同一ビジネスロジック** —— デスクトップ版と同じ `cc-switch-core` クレートを共有。プロバイダー管理、プロキシ、MCP、プロンプト、スキル、使用統計 —— 全て同一。
-- **ブラウザベース UI** —— 同じ React フロントエンドを内蔵 HTTP サーバーが提供。ブラウザで `http://localhost:18180` を開くだけ。
+- **ブラウザベース UI** —— 同じ React フロントエンドを単一の実行ファイルに埋め込み、内蔵 HTTP サーバーが提供。ブラウザで `http://localhost:18180` を開くだけ。
 - **100% コマンド同等** —— 全 265 の Tauri コマンドに Web 版が存在：251 実装、4 フロントエンド shim（ファイルダイアログ）、1 リスタート、5 永続フォールバック、2 no-op、2 部分移行。
 
 ## クイックスタート
@@ -48,7 +48,7 @@ RUST_LOG=info ./cc-switch-web
 npx pnpm@10 install
 npx pnpm@10 build:web
 
-# 2. バックエンドビルド
+# 2. バックエンドビルド（dist-web/ を実行ファイルに埋め込む）
 cargo build --release --bin cc-switch-web
 
 # 3. 実行
@@ -203,7 +203,7 @@ cc-switch-web/
 │   ├── web/shims/                 # Tauri API Web アダプター
 │   └── ...
 ├── vite.web.config.ts             # Web フロントエンドビルド設定
-├── dist-web/                      # ビルドされたフロントエンド
+├── dist-web/                      # ビルド時に cc-switch-web へ埋め込むフロントエンド
 └── _dev/                          # アーキテクチャドキュメント
 ```
 

@@ -8,7 +8,9 @@
 
 use crate::error::AppError;
 use crate::services::session_usage::{self, DataSourceSummary, SessionSyncResult};
-use crate::session_manager::{self, DeleteSessionOutcome, DeleteSessionRequest, SessionMessage, SessionMeta};
+use crate::session_manager::{
+    self, DeleteSessionOutcome, DeleteSessionRequest, SessionMessage, SessionMeta,
+};
 use crate::store::AppState;
 
 /// 扫描所有应用的会话列表。
@@ -21,8 +23,7 @@ pub fn get_session_messages(
     provider_id: &str,
     source_path: &str,
 ) -> Result<Vec<SessionMessage>, AppError> {
-    session_manager::load_messages(provider_id, source_path)
-        .map_err(|e| AppError::Message(e))
+    session_manager::load_messages(provider_id, source_path).map_err(|e| AppError::Message(e))
 }
 
 /// 删除单个会话（按 provider_id + session_id + source_path 定位）。

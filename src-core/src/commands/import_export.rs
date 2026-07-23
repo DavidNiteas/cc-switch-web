@@ -25,10 +25,9 @@ pub fn import_config_from_file(db: &Arc<Database>, file_path: &str) -> Result<Va
     let path_buf = PathBuf::from(file_path);
     let backup_id = db.import_sql(&path_buf)?;
     let db_for_sync = db.clone();
-    let warning =
-        crate::commands::sync_support::post_sync_warning_from_result(Ok(
-            crate::commands::sync_support::run_post_import_sync(db_for_sync),
-        ));
+    let warning = crate::commands::sync_support::post_sync_warning_from_result(Ok(
+        crate::commands::sync_support::run_post_import_sync(db_for_sync),
+    ));
     if let Some(msg) = warning.as_ref() {
         log::warn!("[Import] post-import sync warning: {msg}");
     }

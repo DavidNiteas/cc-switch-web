@@ -854,9 +854,7 @@ export function CodexFormFields({
                 </div>
                 <Switch
                   checked={configOnly}
-                  onCheckedChange={(checked) =>
-                    onConfigOnlyChange?.(checked)
-                  }
+                  onCheckedChange={(checked) => onConfigOnlyChange?.(checked)}
                   aria-label={t("codexConfig.configOnlyLabel", {
                     defaultValue: "非路由配置",
                   })}

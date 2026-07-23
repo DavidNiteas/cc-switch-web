@@ -145,9 +145,7 @@ pub fn uninstall_skill_for_app(
 // SkillService 网络方法（B 类，已下沉到 core）
 // ============================================================================
 
-use crate::services::skill::{
-    DiscoverableSkill, Skill, SkillUpdateInfo, SkillsShSearchResult,
-};
+use crate::services::skill::{DiscoverableSkill, Skill, SkillUpdateInfo, SkillsShSearchResult};
 
 /// 获取全局 SkillService 单例。
 ///
@@ -167,16 +165,15 @@ pub async fn get_skills(db: &Arc<Database>) -> Result<Vec<Skill>, AppError> {
 }
 
 /// `get_skills` 的应用参数化版本（兼容旧 API；新版本不再区分应用）。
-pub async fn get_skills_for_app(
-    db: &Arc<Database>,
-    app: &str,
-) -> Result<Vec<Skill>, AppError> {
+pub async fn get_skills_for_app(db: &Arc<Database>, app: &str) -> Result<Vec<Skill>, AppError> {
     let _ = parse_app_type(app)?;
     get_skills(db).await
 }
 
 /// 发现所有可用技能（从启用的仓库拉取）。
-pub async fn discover_available_skills(db: &Arc<Database>) -> Result<Vec<DiscoverableSkill>, AppError> {
+pub async fn discover_available_skills(
+    db: &Arc<Database>,
+) -> Result<Vec<DiscoverableSkill>, AppError> {
     let repos = db.get_skill_repos().map_err(to_app_error)?;
     skill_service()
         .discover_available(repos)
@@ -198,10 +195,7 @@ pub async fn install_skill_unified(
 }
 
 /// 兼容旧 API：通过 directory 在可发现列表中找到 skill 后安装到 claude。
-pub async fn install_skill(
-    db: &Arc<Database>,
-    directory: &str,
-) -> Result<bool, AppError> {
+pub async fn install_skill(db: &Arc<Database>, directory: &str) -> Result<bool, AppError> {
     install_skill_for_app(db, "claude", directory).await
 }
 
@@ -237,10 +231,7 @@ pub async fn check_skill_updates(db: &Arc<Database>) -> Result<Vec<SkillUpdateIn
 }
 
 /// 更新单个 skill 到最新版本。
-pub async fn update_skill(
-    db: &Arc<Database>,
-    id: &str,
-) -> Result<InstalledSkill, AppError> {
+pub async fn update_skill(db: &Arc<Database>, id: &str) -> Result<InstalledSkill, AppError> {
     skill_service()
         .update_skill(db, id)
         .await

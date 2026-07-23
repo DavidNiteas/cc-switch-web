@@ -20,7 +20,10 @@ pub struct ProfileDto {
 impl From<Profile> for ProfileDto {
     fn from(profile: Profile) -> Self {
         let payload = serde_json::from_str(&profile.payload).unwrap_or_else(|e| {
-            log::warn!("解析 profile '{}' payload 失败，使用默认值: {e}", profile.id);
+            log::warn!(
+                "解析 profile '{}' payload 失败，使用默认值: {e}",
+                profile.id
+            );
             ProfilePayload::default()
         });
         Self {
@@ -54,11 +57,15 @@ pub struct ProfilesResponse {
 pub fn get_profiles(state: &AppState) -> Result<ProfilesResponse, AppError> {
     let profiles = ProfileService::list(state)?;
     let current_ids = CurrentProfileIds {
-        claude: state.db.get_current_profile_id(ProfileScope::Claude.as_str())?,
+        claude: state
+            .db
+            .get_current_profile_id(ProfileScope::Claude.as_str())?,
         claude_desktop: state
             .db
             .get_current_profile_id(ProfileScope::ClaudeDesktop.as_str())?,
-        codex: state.db.get_current_profile_id(ProfileScope::Codex.as_str())?,
+        codex: state
+            .db
+            .get_current_profile_id(ProfileScope::Codex.as_str())?,
     };
     Ok(ProfilesResponse {
         profiles: profiles.into_iter().map(ProfileDto::from).collect(),
@@ -80,17 +87,9 @@ pub fn update_profile(
     resnapshot: Option<bool>,
     scope: Option<&str>,
 ) -> Result<ProfileDto, AppError> {
-    let scope = scope
-        .map(ProfileScope::parse)
-        .transpose()?;
-    ProfileService::update(
-        state,
-        id,
-        name,
-        resnapshot.unwrap_or(false),
-        scope,
-    )
-    .map(ProfileDto::from)
+    let scope = scope.map(ProfileScope::parse).transpose()?;
+    ProfileService::update(state, id, name, resnapshot.unwrap_or(false), scope)
+        .map(ProfileDto::from)
 }
 
 /// 删除项目。

@@ -1,10 +1,14 @@
 use crate::error::AppError;
-use crate::init_status::{get_init_error, take_migration_success, take_skills_migration_result, InitErrorPayload, SkillsMigrationPayload};
+use crate::init_status::{
+    get_init_error, take_migration_success, take_skills_migration_result, InitErrorPayload,
+    SkillsMigrationPayload,
+};
 use crate::platform::Platform;
 
 /// 判断是否为便携版（绿色版）运行
 pub fn is_portable_mode() -> Result<bool, AppError> {
-    let exe_path = std::env::current_exe().map_err(|e| AppError::Message(format!("获取可执行路径失败: {e}")))?;
+    let exe_path = std::env::current_exe()
+        .map_err(|e| AppError::Message(format!("获取可执行路径失败: {e}")))?;
     if let Some(dir) = exe_path.parent() {
         Ok(dir.join("portable.ini").is_file())
     } else {
@@ -42,8 +46,8 @@ pub async fn copy_text_to_clipboard(
     text: String,
 ) -> Result<bool, AppError> {
     tokio::task::spawn_blocking(move || {
-        let mut clipboard =
-            arboard::Clipboard::new().map_err(|e| AppError::Message(format!("访问系统剪贴板失败: {e}")))?;
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| AppError::Message(format!("访问系统剪贴板失败: {e}")))?;
         clipboard
             .set_text(text)
             .map_err(|e| AppError::Message(format!("写入系统剪贴板失败: {e}")))?;
@@ -139,7 +143,8 @@ pub async fn open_provider_terminal(
         command,
         cwd: cwd.map(|s| s.to_string()),
         env_vars,
-        message: "Web mode: cannot open terminal. Copy the command to run in your local shell.".to_string(),
+        message: "Web mode: cannot open terminal. Copy the command to run in your local shell."
+            .to_string(),
     })
 }
 
@@ -152,7 +157,8 @@ pub fn launch_session_terminal(
         command: command.to_string(),
         cwd: cwd.map(|s| s.to_string()),
         env_vars: vec![],
-        message: "Web mode: cannot open terminal. Copy the command to run in your local shell.".to_string(),
+        message: "Web mode: cannot open terminal. Copy the command to run in your local shell."
+            .to_string(),
     })
 }
 
@@ -230,12 +236,14 @@ pub struct ToolVersion {
 /// **简化版**：循环跑 `tool --version`，解析输出。
 /// 桌面版有更复杂的逻辑（WSL 路由、多版本枚举、latest 查询等），Web 模式暂只实现
 /// 基础探测，足以告诉前端"装了没、什么版本"。
-pub async fn get_tool_versions(
-    tools: Option<Vec<String>>,
-) -> Result<Vec<ToolVersion>, AppError> {
+pub async fn get_tool_versions(tools: Option<Vec<String>>) -> Result<Vec<ToolVersion>, AppError> {
     let requested: Vec<&str> = if let Some(tools) = tools.as_ref() {
         let set: std::collections::HashSet<&str> = tools.iter().map(|s| s.as_str()).collect();
-        VALID_TOOLS.iter().copied().filter(|t| set.contains(t)).collect()
+        VALID_TOOLS
+            .iter()
+            .copied()
+            .filter(|t| set.contains(t))
+            .collect()
     } else {
         VALID_TOOLS.to_vec()
     };
@@ -306,11 +314,23 @@ fn parse_version_from_output(stdout: &str) -> Option<String> {
 fn extract_version(token: &str) -> Option<String> {
     let cleaned = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-');
     // 必须包含至少一个点号且首字符是数字
-    if cleaned.contains('.') && cleaned.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+    if cleaned.contains('.')
+        && cleaned
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+    {
         return Some(cleaned.to_string());
     }
     if let Some(rest) = cleaned.strip_prefix('v') {
-        if rest.contains('.') && rest.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        if rest.contains('.')
+            && rest
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+        {
             return Some(rest.to_string());
         }
     }
@@ -345,7 +365,9 @@ pub struct ToolInstallationReport {
 /// **简化版**：只查 `which tool` 找到 PATH 中的默认入口，跑 `--version` 验证。
 /// 桌面版会枚举 nvm/homebrew/npm root 等多路径并做冲突诊断，Web 模式暂只实现
 /// 基础探测。
-pub async fn probe_tool_installations(tools: Vec<String>) -> Result<Vec<ToolInstallationReport>, AppError> {
+pub async fn probe_tool_installations(
+    tools: Vec<String>,
+) -> Result<Vec<ToolInstallationReport>, AppError> {
     let requested: Vec<&str> = VALID_TOOLS
         .iter()
         .copied()
@@ -366,7 +388,11 @@ pub async fn probe_tool_installations(tools: Vec<String>) -> Result<Vec<ToolInst
                 }
                 Ok(out) => {
                     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    (None, false, Some(format!("exit {}: {}", out.status, stderr.trim())))
+                    (
+                        None,
+                        false,
+                        Some(format!("exit {}: {}", out.status, stderr.trim())),
+                    )
                 }
                 Err(e) => (None, false, Some(e.to_string())),
             },
@@ -397,7 +423,11 @@ pub async fn probe_tool_installations(tools: Vec<String>) -> Result<Vec<ToolInst
 
 /// `which tool` 的跨平台实现。
 fn which_tool(tool: &str) -> Option<String> {
-    let cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
     let output = Command::new(cmd).arg(tool).output().ok()?;
     if !output.status.success() {
         return None;
@@ -469,10 +499,7 @@ impl std::str::FromStr for ToolLifecycleAction {
 /// 1. 服务器已安装 Node.js / npm
 /// 2. 当前用户对全局 npm 目录有写权限（或配了 npm prefix）
 /// 3. 前端 UI 应明确告知"将在服务器上执行 npm install"
-pub async fn run_tool_lifecycle_action(
-    tools: Vec<String>,
-    action: String,
-) -> Result<(), AppError> {
+pub async fn run_tool_lifecycle_action(tools: Vec<String>, action: String) -> Result<(), AppError> {
     let action: ToolLifecycleAction = action.parse()?;
     let requested: Vec<&str> = VALID_TOOLS
         .iter()
@@ -519,7 +546,9 @@ pub async fn run_tool_lifecycle_action(
                 )));
             }
             Err(e) => {
-                return Err(AppError::Message(format!("npm {action_str} -g {pkg} 失败: {e}")));
+                return Err(AppError::Message(format!(
+                    "npm {action_str} -g {pkg} 失败: {e}"
+                )));
             }
         }
     }

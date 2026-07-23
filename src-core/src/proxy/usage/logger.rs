@@ -45,10 +45,7 @@ pub struct UsageLogger<'a> {
 }
 
 impl<'a> UsageLogger<'a> {
-    pub fn new(
-        db: &'a Database,
-        usage_log_callback: Option<Arc<dyn Fn() + Send + Sync>>,
-    ) -> Self {
+    pub fn new(db: &'a Database, usage_log_callback: Option<Arc<dyn Fn() + Send + Sync>>) -> Self {
         Self {
             db,
             usage_log_callback,

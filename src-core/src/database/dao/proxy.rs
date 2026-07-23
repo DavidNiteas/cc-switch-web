@@ -706,9 +706,7 @@ impl Database {
     ///
     /// 熔断器配置已合并到 proxy_config 表，每 app 独立
     /// 此方法保留用于兼容旧代码，建议使用 get_proxy_config_for_app
-    pub async fn get_circuit_breaker_config(
-        &self,
-    ) -> Result<CircuitBreakerConfig, AppError> {
+    pub async fn get_circuit_breaker_config(&self) -> Result<CircuitBreakerConfig, AppError> {
         // 使用 block 限制 conn 的作用域，避免跨 await 持有锁
         let result = {
             let conn = lock_conn!(self.conn);

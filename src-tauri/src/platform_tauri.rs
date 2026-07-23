@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use tauri::{Emitter, Manager};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind as TauriMessageDialogKind};
+use tauri_plugin_dialog::{
+    DialogExt, MessageDialogButtons, MessageDialogKind as TauriMessageDialogKind,
+};
 
 pub struct TauriPlatform {
     app: tauri::AppHandle,

@@ -2521,10 +2521,7 @@ impl ProviderService {
 
         // 非路由配置模式：仅写入 config.toml + auth.json，不启动代理接管。
         if matches!(app_type, AppType::Codex)
-            && _provider
-                .meta
-                .as_ref()
-                .is_some_and(|m| m.is_config_only())
+            && _provider.meta.as_ref().is_some_and(|m| m.is_config_only())
         {
             log::info!(
                 "非路由配置模式：写入 {} 供应商 '{}' 的配置（不启动代理）",

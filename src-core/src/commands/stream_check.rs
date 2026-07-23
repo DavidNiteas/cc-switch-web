@@ -18,10 +18,7 @@ pub fn get_stream_check_config(db: &Database) -> Result<StreamCheckConfig, AppEr
 }
 
 /// 保存连通性检查配置。
-pub fn save_stream_check_config(
-    db: &Database,
-    config: StreamCheckConfig,
-) -> Result<(), AppError> {
+pub fn save_stream_check_config(db: &Database, config: StreamCheckConfig) -> Result<(), AppError> {
     db.save_stream_check_config(&config)
 }
 
@@ -38,15 +35,13 @@ pub async fn stream_check_provider(
         .ok_or_else(|| AppError::Message(format!("供应商 {provider_id} 不存在")))?;
 
     let base_url_override = resolve_copilot_base_url_override(state, provider).await?;
-    let result = StreamCheckService::check_with_retry(&app_type, provider, &config, base_url_override)
-        .await?;
+    let result =
+        StreamCheckService::check_with_retry(&app_type, provider, &config, base_url_override)
+            .await?;
 
-    let _ = state.db.save_stream_check_log(
-        provider_id,
-        &provider.name,
-        app_type.as_str(),
-        &result,
-    );
+    let _ = state
+        .db
+        .save_stream_check_log(provider_id, &provider.name, app_type.as_str(), &result);
     Ok(result)
 }
 
@@ -84,19 +79,20 @@ pub async fn stream_check_all_providers(
             }
         }
         let base_url_override = resolve_copilot_base_url_override(state, &provider).await?;
-        let result = StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
-            .await
-            .unwrap_or_else(|e| StreamCheckResult {
-                status: crate::services::stream_check::HealthStatus::Failed,
-                success: false,
-                message: e.to_string(),
-                response_time_ms: None,
-                http_status: None,
-                model_used: String::new(),
-                tested_at: chrono::Utc::now().timestamp(),
-                retry_count: 0,
-                error_category: None,
-            });
+        let result =
+            StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
+                .await
+                .unwrap_or_else(|e| StreamCheckResult {
+                    status: crate::services::stream_check::HealthStatus::Failed,
+                    success: false,
+                    message: e.to_string(),
+                    response_time_ms: None,
+                    http_status: None,
+                    model_used: String::new(),
+                    tested_at: chrono::Utc::now().timestamp(),
+                    retry_count: 0,
+                    error_category: None,
+                });
         let _ = state
             .db
             .save_stream_check_log(&id, &provider.name, app_type.as_str(), &result);

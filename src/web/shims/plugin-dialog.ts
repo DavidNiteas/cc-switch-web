@@ -29,13 +29,13 @@ export interface SaveOptions {
  *
  * 与 Tauri 行为一致：未选返回 null，选了返回路径字符串。
  */
-export async function open(options?: OpenOptions): Promise<string | string[] | null> {
+export async function open(
+  options?: OpenOptions,
+): Promise<string | string[] | null> {
   const input = document.createElement("input");
   input.type = "file";
   if (options?.filters?.[0]?.extensions) {
-    input.accept = options.filters[0]
-      .extensions.map((e) => `.${e}`)
-      .join(",");
+    input.accept = options.filters[0].extensions.map((e) => `.${e}`).join(",");
   }
   if (options?.multiple) {
     input.multiple = true;
@@ -81,14 +81,20 @@ export async function save(options?: SaveOptions): Promise<string | null> {
 /**
  * 消息提示框（用浏览器 alert）。
  */
-export async function message(content: string, _options?: { title?: string }): Promise<void> {
+export async function message(
+  content: string,
+  _options?: { title?: string },
+): Promise<void> {
   alert(content);
 }
 
 /**
  * 确认对话框（用浏览器 confirm）。
  */
-export async function confirm(content: string, _options?: { title?: string }): Promise<boolean> {
+export async function confirm(
+  content: string,
+  _options?: { title?: string },
+): Promise<boolean> {
   // 注意：函数名 confirm 与全局 window.confirm 同名，需要显式调用
   return window.confirm(content);
 }

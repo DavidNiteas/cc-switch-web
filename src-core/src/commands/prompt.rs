@@ -7,10 +7,7 @@ use indexmap::IndexMap;
 use std::str::FromStr;
 
 /// 获取指定应用的所有提示词。
-pub fn get_prompts(
-    state: &AppState,
-    app: &str,
-) -> Result<IndexMap<String, Prompt>, AppError> {
+pub fn get_prompts(state: &AppState, app: &str) -> Result<IndexMap<String, Prompt>, AppError> {
     let app_type = AppType::from_str(app)?;
     PromptService::get_prompts(state, app_type)
 }

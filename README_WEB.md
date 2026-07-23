@@ -26,7 +26,7 @@ English | [中文](README_WEB_ZH.md) | [日本語](README_WEB_JA.md) | [Original
 
 - **Zero GUI Dependencies** — No GTK, no WebKitGTK, no X11. Pure Rust + Axum HTTP server. Runs on any Linux server.
 - **Same Business Logic** — Shares the exact same `cc-switch-core` crate as the desktop version. Provider management, proxy, MCP, prompts, skills, usage stats — all identical.
-- **Browser-Based UI** — The same React frontend, served by the built-in HTTP server. Open `http://localhost:18180` in any browser.
+- **Browser-Based UI** — The same React frontend is embedded in a single executable and served by the built-in HTTP server. Open `http://localhost:18180` in any browser.
 - **100% Command Parity** — All 265 Tauri commands have Web equivalents: 251 real implementations, 4 frontend shim (file dialogs), 1 restart endpoint, 5 permanent fallbacks, 2 no-op, 2 partial (return path/command strings).
 
 <div align="center">
@@ -94,9 +94,9 @@ RUST_LOG=info ./cc-switch-web
 npx pnpm@10 install
 npx pnpm@10 build:web    # outputs to dist-web/
 
-# 2. Build backend
+# 2. Build backend (embeds dist-web/ into the executable)
 cargo build --release --bin cc-switch-web
-# binary: target/release/cc-switch-web
+# single-file binary: target/release/cc-switch-web
 
 # 3. Run
 RUST_LOG=info ./target/release/cc-switch-web
@@ -107,8 +107,6 @@ RUST_LOG=info ./target/release/cc-switch-web
 ```dockerfile
 FROM debian:bookworm-slim
 COPY cc-switch-web /usr/local/bin/
-COPY dist-web/ /app/dist-web/
-WORKDIR /app
 CMD ["cc-switch-web"]
 ```
 
@@ -327,7 +325,7 @@ cc-switch-web/
 │   │   └── path.ts                # homeDir/join → /api/info
 │   └── ...                        # Same React components as desktop
 ├── vite.web.config.ts             # Web frontend build config
-├── dist-web/                      # Built frontend (served by cc-switch-web)
+├── dist-web/                      # Frontend embedded into cc-switch-web at build time
 └── _dev/                          # Architecture docs & migration roadmap
 ```
 

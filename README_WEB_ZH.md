@@ -26,7 +26,7 @@
 
 - **零 GUI 依赖** —— 不需要 GTK、WebKitGTK、X11。纯 Rust + Axum HTTP 服务器，可在任何 Linux 服务器上运行。
 - **相同的业务逻辑** —— 与桌面版共享完全相同的 `cc-switch-core` crate。供应商管理、代理、MCP、提示词、技能、用量统计——全部一致。
-- **基于浏览器的 UI** —— 相同的 React 前端，由内置 HTTP 服务器提供。在任意浏览器中打开 `http://localhost:18180`。
+- **基于浏览器的 UI** —— 相同的 React 前端被嵌入单个可执行文件，由内置 HTTP 服务器提供。在任意浏览器中打开 `http://localhost:18180`。
 - **100% 命令对等** —— 全部 265 个 Tauri 命令都有 Web 等价物：251 个真实实现、4 个前端 shim（文件对话框）、1 个重启端点、5 个永久兜底、2 个 no-op、2 个部分迁移（返回路径/命令字符串）。
 
 <div align="center">
@@ -94,9 +94,9 @@ RUST_LOG=info ./cc-switch-web
 npx pnpm@10 install
 npx pnpm@10 build:web    # 输出到 dist-web/
 
-# 2. 构建后端
+# 2. 构建后端（将 dist-web/ 嵌入可执行文件）
 cargo build --release --bin cc-switch-web
-# 二进制：target/release/cc-switch-web
+# 单文件二进制：target/release/cc-switch-web
 
 # 3. 运行
 RUST_LOG=info ./target/release/cc-switch-web
@@ -107,8 +107,6 @@ RUST_LOG=info ./target/release/cc-switch-web
 ```dockerfile
 FROM debian:bookworm-slim
 COPY cc-switch-web /usr/local/bin/
-COPY dist-web/ /app/dist-web/
-WORKDIR /app
 CMD ["cc-switch-web"]
 ```
 
@@ -327,7 +325,7 @@ cc-switch-web/
 │   │   └── path.ts                # homeDir/join → /api/info
 │   └── ...                        # 与桌面版相同的 React 组件
 ├── vite.web.config.ts             # Web 前端构建配置
-├── dist-web/                      # 构建的前端（由 cc-switch-web 提供）
+├── dist-web/                      # 构建时嵌入 cc-switch-web 的前端产物
 └── _dev/                          # 架构文档与迁移路线图
 ```
 

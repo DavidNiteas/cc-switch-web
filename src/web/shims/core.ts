@@ -17,7 +17,7 @@ export async function invoke<T>(cmd: string, args?: InvokeArgs): Promise<T> {
     return handleDialogCommand<T>(cmd, args);
   }
   if (RESTART_COMMANDS.has(cmd)) {
-    const res = await fetch('/api/restart', { method: 'POST' });
+    const res = await fetch("/api/restart", { method: "POST" });
     const json = await res.json();
     if (!json.success) {
       throw new Error(json.error ?? `restart_app failed`);
@@ -25,9 +25,9 @@ export async function invoke<T>(cmd: string, args?: InvokeArgs): Promise<T> {
     return json.data as T;
   }
 
-  const res = await fetch('/api/invoke', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch("/api/invoke", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ cmd, args: args ?? {} }),
   });
   const json = await res.json();
@@ -54,12 +54,17 @@ export class Channel<T = unknown> {
 }
 
 // 文件对话框命令在 Web 模式下用 HTML <input> / <a download> 实现
-async function handleDialogCommand<T>(cmd: string, args?: InvokeArgs): Promise<T> {
+async function handleDialogCommand<T>(
+  cmd: string,
+  args?: InvokeArgs,
+): Promise<T> {
   const dialog = await import("./plugin-dialog");
 
   switch (cmd) {
     case "open_file_dialog":
-      return (await dialog.open({ filters: [{ name: "SQL", extensions: ["sql"] }] })) as T;
+      return (await dialog.open({
+        filters: [{ name: "SQL", extensions: ["sql"] }],
+      })) as T;
     case "open_zip_file_dialog":
       return (await dialog.open({
         filters: [{ name: "ZIP / Skill", extensions: ["zip", "skill"] }],
@@ -68,7 +73,10 @@ async function handleDialogCommand<T>(cmd: string, args?: InvokeArgs): Promise<T
       const input = document.createElement("input");
       input.type = "text";
       input.placeholder = "输入目录路径（Web 模式下不能选择目录）";
-      const path = window.prompt("请输入目录路径：", (args?.defaultPath as string) ?? "");
+      const path = window.prompt(
+        "请输入目录路径：",
+        (args?.defaultPath as string) ?? "",
+      );
       return path as T;
     }
     case "save_file_dialog": {

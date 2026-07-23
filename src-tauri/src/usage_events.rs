@@ -10,7 +10,10 @@ use tauri::{AppHandle, Emitter};
 pub fn init(handle: AppHandle) {
     let callback: Arc<dyn Fn() + Send + Sync + 'static> = Arc::new(move || {
         if let Err(e) = handle.emit(cc_switch_core::usage_events::EVENT_USAGE_LOG_RECORDED, ()) {
-            log::warn!("emit {} 失败: {e}", cc_switch_core::usage_events::EVENT_USAGE_LOG_RECORDED);
+            log::warn!(
+                "emit {} 失败: {e}",
+                cc_switch_core::usage_events::EVENT_USAGE_LOG_RECORDED
+            );
         }
     });
     cc_switch_core::usage_events::init(callback);

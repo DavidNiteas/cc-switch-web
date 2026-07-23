@@ -231,6 +231,8 @@ export interface ProviderMeta {
   providerType?: string;
   // GitHub Copilot 关联账号 ID（旧字段，保留兼容读取）
   githubAccountId?: string;
+  // 非路由配置模式：仅写入 config.toml + auth.json，不启动代理转发
+  configOnly?: boolean;
 }
 
 // Skill 同步方式

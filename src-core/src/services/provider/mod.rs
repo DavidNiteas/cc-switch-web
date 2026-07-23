@@ -2519,6 +2519,21 @@ impl ProviderService {
             return Self::switch_normal(state, app_type, id, &providers);
         }
 
+        // 非路由配置模式：仅写入 config.toml + auth.json，不启动代理接管。
+        if matches!(app_type, AppType::Codex)
+            && _provider
+                .meta
+                .as_ref()
+                .is_some_and(|m| m.is_config_only())
+        {
+            log::info!(
+                "非路由配置模式：写入 {} 供应商 '{}' 的配置（不启动代理）",
+                app_type.as_str(),
+                id
+            );
+            return Self::switch_normal(state, app_type, id, &providers);
+        }
+
         if matches!(app_type, AppType::ClaudeDesktop) {
             return Self::switch_normal(state, app_type, id, &providers);
         }

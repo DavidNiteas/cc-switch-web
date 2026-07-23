@@ -109,6 +109,10 @@ interface CodexFormFieldsProps {
   onLocalProxyHeadersOverrideChange: (value: string) => void;
   localProxyBodyOverride: string;
   onLocalProxyBodyOverrideChange: (value: string) => void;
+
+  // 非路由配置模式：仅写入 config.toml + auth.json，不启动代理转发
+  configOnly?: boolean;
+  onConfigOnlyChange?: (value: boolean) => void;
 }
 
 type CodexCatalogRow = CodexCatalogModel & { rowId: string };
@@ -199,6 +203,8 @@ export function CodexFormFields({
   onLocalProxyHeadersOverrideChange,
   localProxyBodyOverride,
   onLocalProxyBodyOverrideChange,
+  configOnly = false,
+  onConfigOnlyChange,
 }: CodexFormFieldsProps) {
   const { t } = useTranslation();
 
@@ -827,6 +833,34 @@ export function CodexFormFields({
                     })}
                   />
                 </div>
+              </div>
+            )}
+
+            {/* 非路由配置模式：仅写入配置，不启动代理 */}
+            {(category as string) !== "official" && (
+              <div className="flex items-center justify-between gap-4 border-t border-border-default pt-3">
+                <div className="space-y-1">
+                  <FormLabel>
+                    {t("codexConfig.configOnlyLabel", {
+                      defaultValue: "非路由配置",
+                    })}
+                  </FormLabel>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {t("codexConfig.configOnlyHint", {
+                      defaultValue:
+                        "仅管理 config.toml 和 auth.json，不启动本地代理转发。Codex CLI 直连供应商，适用于无路由需求的场景。",
+                    })}
+                  </p>
+                </div>
+                <Switch
+                  checked={configOnly}
+                  onCheckedChange={(checked) =>
+                    onConfigOnlyChange?.(checked)
+                  }
+                  aria-label={t("codexConfig.configOnlyLabel", {
+                    defaultValue: "非路由配置",
+                  })}
+                />
               </div>
             )}
 

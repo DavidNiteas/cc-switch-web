@@ -409,6 +409,14 @@ export function ProviderCard({
                 </span>
               )}
 
+              {appId === "codex" && provider.meta?.configOnly === true && (
+                <span className="inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                  {t("codex.configOnly", {
+                    defaultValue: "非路由配置",
+                  })}
+                </span>
+              )}
+
               {appId === "claude" && provider.category === "official" && (
                 <span className="inline-flex items-center rounded-md bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700/60 dark:text-slate-200">
                   {t("claudeCode.noRoutingSupport", {

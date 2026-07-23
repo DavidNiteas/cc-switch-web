@@ -509,6 +509,10 @@ pub struct ProviderMeta {
     /// - "github_copilot": GitHub Copilot 供应商
     #[serde(rename = "providerType", skip_serializing_if = "Option::is_none")]
     pub provider_type: Option<String>,
+    /// 非路由配置模式：仅写入 config.toml + auth.json，不启动代理转发。
+    /// 适用于 Codex 供应商直连场景，类似 OpenCode 的配置管理模式。
+    #[serde(rename = "configOnly", skip_serializing_if = "Option::is_none")]
+    pub config_only: Option<bool>,
     /// GitHub Copilot 关联账号 ID（仅 github_copilot 供应商使用）
     /// 用于多账号支持，关联到特定的 GitHub 账号
     #[serde(rename = "githubAccountId", skip_serializing_if = "Option::is_none")]
@@ -568,6 +572,11 @@ impl ProviderMeta {
         }
 
         None
+    }
+
+    /// 是否为非路由配置模式（仅写 config + auth，不启动代理）。
+    pub fn is_config_only(&self) -> bool {
+        self.config_only.unwrap_or(false)
     }
 }
 

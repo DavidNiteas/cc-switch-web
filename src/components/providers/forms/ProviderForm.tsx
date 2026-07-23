@@ -613,6 +613,10 @@ function ProviderFormFull({
         : "",
     );
 
+  const [localCodexConfigOnly, setLocalCodexConfigOnly] = useState<boolean>(
+    initialData?.meta?.configOnly === true,
+  );
+
   const { configError: codexConfigError, debouncedValidate } =
     useCodexTomlValidation();
 
@@ -1555,6 +1559,10 @@ function ProviderFormFull({
         supportsFullUrl && category !== "official" && localIsFullUrl
           ? true
           : undefined,
+      configOnly:
+        appId === "codex" && category !== "official" && localCodexConfigOnly
+          ? true
+          : undefined,
     };
 
     if (!isCodexOauthProvider && "codexFastMode" in nextMeta) {
@@ -2213,6 +2221,8 @@ function ProviderFormFull({
               onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
               localProxyBodyOverride={localProxyBodyOverride}
               onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+              configOnly={localCodexConfigOnly}
+              onConfigOnlyChange={setLocalCodexConfigOnly}
             />
           )}
 
